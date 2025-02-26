@@ -1,6 +1,8 @@
-from typing import Dict, Any, Optional, List
-from pydantic import BaseModel
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
+from pydantic import BaseModel
+
 from humun_benchmark.utils.format import format_timeseries_input
 
 
@@ -8,7 +10,7 @@ from humun_benchmark.utils.format import format_timeseries_input
 class Prompt(BaseModel):
     task: str
     timeseries: pd.DataFrame
-    forecast_split: float = 0.2
+    n_timesteps: int = 12
     context: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     prompt_text: Optional[str] = None
@@ -16,6 +18,22 @@ class Prompt(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True  # Allow pd.DataFrame as a field
+
+    def serialise(self) -> Dict[str, Any]:
+        """
+        Serialize prompt configuration and data for logging.
+        """
+        info = (
+            {
+                "task": self.task,
+                "n_timesteps": self.n_timesteps,
+                "context": self.context,
+                "metadata": self.metadata,
+                "forecasts": len(self.responses),
+            },
+        )
+
+        return info
 
 
 class InstructPrompt(Prompt):
@@ -25,7 +43,7 @@ class InstructPrompt(Prompt):
         self,
         task: str,
         timeseries: pd.DataFrame,
-        forecast_split: float = 0.2,
+        n_timesteps: int = 12,
         context: str = None,
         metadata: Optional[Dict[str, Any]] = None,
     ):
@@ -33,7 +51,7 @@ class InstructPrompt(Prompt):
         super().__init__(
             task=task,
             timeseries=timeseries,
-            forecast_split=forecast_split,
+            n_timesteps=n_timesteps,
             context=context,
             metadata=metadata,
         )
@@ -50,25 +68,35 @@ class InstructPrompt(Prompt):
         if self.metadata:
             prompt_text += f"<metadata>\n{self.metadata}\n</metadata>\n"
 
-        prompt_text += format_timeseries_input(self.timeseries, self.forecast_split)
+        prompt_text += format_timeseries_input(self.timeseries, self.n_timesteps)
         return prompt_text
 
     def merge_forecasts(self, dfs: List[pd.DataFrame]):
         """
-        Merge forecast responses together
+        Merge forecast responses together and include original values for metric calculation.
         """
+
         # Rename the value columns to forecast_1, forecast_2, ..., forecast_n
         for i, df in enumerate(dfs, start=1):
             df.rename(columns={"value": f"forecast_{i}"}, inplace=True)
 
-        # Merge all dataframes on the date column
+        # Merge all forecast dataframes on the date column
         merged_df = dfs[0]
-
         if len(dfs) > 1:
             for df in dfs[1:]:
                 merged_df = pd.merge(merged_df, df, on="date", how="outer")
 
-        self.results_df = merged_df
+        # Convert dates to same type
+        merged_df["date"] = pd.to_datetime(merged_df["date"])
+        self.timeseries["date"] = pd.to_datetime(self.timeseries["date"])
+
+        # Merge with original timeseries to get actual values
+        self.results_df = pd.merge(
+            merged_df,
+            self.timeseries[["date", "value"]],
+            on="date",
+            how="inner",
+        )
 
 
 class MultiModalPrompt(Prompt):
