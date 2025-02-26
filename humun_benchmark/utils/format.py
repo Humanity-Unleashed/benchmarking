@@ -1,19 +1,3 @@
-"""
-https://github.com/ServiceNow/context-is-key-forecasting/blob/main/cik_benchmark/baselines/direct_prompt.py#L99C5-L112C69
-
-example output taken from direct_prompt
-
-<history>
-(t1, v1)
-(t2, v2)
-(t3, v3)
-</history>
-<forecast>
-(t4, v4)
-(t5, v5)
-</forecast>
-"""
-
 import logging
 import re
 
@@ -22,10 +6,51 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 
+def truncate_dataset(
+    timeseries_df: pd.DataFrame, train_ratio: int = 3, n_steps: int = 12
+) -> pd.DataFrame:
+    """
+    Truncate a timeseries DataFrame to the last (train_ratio+1)*n_steps rows.
+
+    If the dataset is too short, a ValueError is raised.
+
+    Args:
+        timeseries_df (pd.DataFrame): Sorted timeseries data.
+        train_ratio (int): Multiplier for training periods (default: 3).
+        n_steps (int): Number of forecast steps (default: 12).
+
+    Returns:
+        pd.DataFrame: The truncated DataFrame.
+    """
+    total_required = (train_ratio + 1) * n_steps
+    if len(timeseries_df) < total_required:
+        raise ValueError(
+            f"Dataset length ({len(timeseries_df)}) is less than the required {total_required} "
+            f"points for train_ratio={train_ratio} and n_steps={n_steps}."
+        )
+
+    truncated_df = timeseries_df.iloc[-total_required:]
+    return truncated_df
+
+
 def format_timeseries_input(df: pd.DataFrame, n_timesteps: int) -> str:
     """
     Formats and returns the timeseries history used by the model to forecast
     unseen timestamp values.
+
+    https://github.com/ServiceNow/context-is-key-forecasting/blob/main/cik_benchmark/baselines/direct_prompt.py#L99C5-L112C69
+
+    Example:
+
+    <history>
+    (t1, v1)
+    (t2, v2)
+    (t3, v3)
+    </history>
+    <forecast>
+    (t4, v4)
+    (t5, v5)
+    </forecast>
     """
 
     if "date" not in df.columns or "value" not in df.columns:

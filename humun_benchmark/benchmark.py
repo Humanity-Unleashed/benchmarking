@@ -14,6 +14,7 @@ from humun_benchmark.metrics import compute_dataset_metrics, compute_forecast_me
 from humun_benchmark.utils.checks import check_env
 from humun_benchmark.utils.log_config import setup_logging
 from humun_benchmark.utils.tasks import NUMERICAL
+from humun_benchmark.utils.format import truncate_dataset
 from humun_benchmark.utils.get_data import (
     get_data,
     get_series_by_id,
@@ -30,25 +31,29 @@ time = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 def benchmark(
-    datasets_path: str = os.getenv("DATASETS_PATH"),
-    metadata_path: str = os.getenv("METADATA_PATH"),
+    models: list[str] = ["llama-3.1-8b-instruct"],
     output_path: str = os.getenv("RESULTS_STORE"),
+    metadata_path: str = os.getenv("METADATA_PATH"),
+    datasets_path: str = os.getenv("DATASETS_PATH"),
     selector: Union[Dict, List[str]] = {"frequency": "Monthly"},
     n_datasets: int = 3,
-    models: list[str] = ["llama-3.1-8b-instruct"],
     batch_size: int = 1,
+    train_ratio: int = 3,
+    n_steps: int = 12,
 ) -> None:
     """
     Run benchmarks on time series data, selecting data either by filters or series IDs.
 
     Args:
-        datasets_path: Path to time series data
-        metadata_path: Path to metadata
+        models: List of model names to benchmark
         output_path: Where to store results
+        metadata_path: Path to metadata
+        datasets_path: Path to time series data
         selector: Either dict of filters or list of series IDs
         n_datasets: Number of datasets to retrieve (used with filters)
-        models: List of model names to benchmark
         batch_size: Number of runs per inference
+        train_ratio: Multiplier for training period
+        n_steps: Number of forecast steps
     """
 
     # Validate required paths
@@ -78,6 +83,7 @@ def benchmark(
     log.info(f"Benchmark Parameters:\n{pformat(params)}")
 
     log.info("Reading in Metadata and Datasets...")
+
     # Get data based on selector type
     if isinstance(selector, list):
         fred_data = get_series_by_id(
@@ -116,8 +122,14 @@ def benchmark(
 
             timeseries_df = convert_array_to_df(fred_data[series_id]["timeseries"])
 
-            # create a prompt
-            prompt = InstructPrompt(task=NUMERICAL, timeseries=timeseries_df)
+            timeseries_df = truncate_dataset(
+                timeseries_df, train_ratio=train_ratio, n_steps=n_steps
+            )
+
+            # create a prompt - TODO: remove data pre-processing from prompt.
+            prompt = InstructPrompt(
+                task=NUMERICAL, timeseries=timeseries_df, n_steps=n_steps
+            )
 
             # store prompt token amount for analysis
             prompt_length = len(llm.tokenizer.encode(prompt.prompt_text))
@@ -182,10 +194,17 @@ if __name__ == "__main__":
         description="Run benchmarks for Instruct LLMs on time series data."
     )
     parser.add_argument(
-        "--datasets_path",
+        "--models",
         type=str,
-        default=os.getenv("DATASETS_PATH"),
-        help="Path to parquet file containing time series data",
+        nargs="+",
+        default=["llama-3.1-8b-instruct"],
+        help="List of models to benchmark",
+    )
+    parser.add_argument(
+        "--output_path",
+        type=str,
+        default=os.getenv("RESULTS_STORE"),
+        help="Directory to save benchmark results",
     )
     parser.add_argument(
         "--metadata_path",
@@ -194,10 +213,10 @@ if __name__ == "__main__":
         help="Path to CSV file containing metadata",
     )
     parser.add_argument(
-        "--output_path",
+        "--datasets_path",
         type=str,
-        default=os.getenv("RESULTS_STORE"),
-        help="Directory to save benchmark results",
+        default=os.getenv("DATASETS_PATH"),
+        help="Path to parquet file containing time series data",
     )
     parser.add_argument(
         "--series_ids",
@@ -218,17 +237,22 @@ if __name__ == "__main__":
         help="Number of datasets to retrieve when using filters",
     )
     parser.add_argument(
-        "--models",
-        type=str,
-        nargs="+",
-        default=["llama-3.1-8b-instruct"],
-        help="List of models to benchmark",
-    )
-    parser.add_argument(
         "--batch_size",
         type=int,
         default=1,
         help="Number of inferences per dataset",
+    )
+    parser.add_argument(
+        "--n_steps",
+        type=int,
+        default=12,
+        help="Number of forecast steps (default: 12).",
+    )
+    parser.add_argument(
+        "--train_ratio",
+        type=int,
+        default=3,
+        help="Training ratio (default: 3).",
     )
     args = parser.parse_args()
 
@@ -249,7 +273,5 @@ if __name__ == "__main__":
     benchmark(selector=selector, n_datasets=n_datasets, **vars_dict)
 
 
-# Note: currently /workspace/ does not have enough space, so all_fred_metadata.csv has been downloaded into personal directory, use humun_benchmark/adhoc/downloadGC.py (get API key from link in file).
-
 # Usage example:
-#  python humun_benchmark/benchmark.py --metadata_path 'all_fred_metadata.csv' --output_path . --models llama-3.1-8b-instruct ministral-8b-instruct-2410
+#  python humun_benchmark/benchmark.py --datasets_path '../split.parquet' --metadata_path '../all_fred_metadata.csv' --output_path . --models llama-3.1-8b-instruct -n_datasets=1 -batch_size=5

@@ -149,7 +149,11 @@ def get_series_by_id(
     found_ids = set(result_df["id"])
     missing_ids = set(series_ids) - found_ids
     if missing_ids:
-        raise ValueError(f"Series IDs not found in metadata: {missing_ids}")
+        # raise ValueError(f"Series IDs not found in metadata: {missing_ids}")
+        log.warning(
+            f"Skipped {len(missing_ids)} datasets due to not having metadata: {missing_ids}"
+        )
+        series_ids = list(set(series_ids) - set(missing_ids))
 
     # Read time series data with filtering.
     ts_df = pd.read_parquet(
@@ -193,8 +197,17 @@ def get_series_by_id(
     return result
 
 
-def get_dataset_info(fred_data):
-    """Create formatted strings for each series with their details."""
+def get_dataset_info(fred_data: dict):
+    """
+    Create formatted strings for each series with their details.
+
+    Args:
+        fred_data (Dict[str, Dict]) : a dictionary containing, for each series ID, it's
+        metadata and timeseries data. Note this is a processed subset of the fred data-source.
+
+    Returns:
+        A formatted string with dataset info for logging.
+    """
     series_details = []
     for series_id, data in fred_data.items():
         length = len(data["timeseries"])
