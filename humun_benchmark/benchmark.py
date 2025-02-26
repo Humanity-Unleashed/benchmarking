@@ -21,6 +21,7 @@ from humun_benchmark.utils.get_data import (
     get_dataset_info,
     convert_array_to_df,
 )
+from humun_benchmark.utils.series_ids import SERIES_IDS
 
 
 # load .env and check needed variables exist
@@ -35,7 +36,7 @@ def benchmark(
     output_path: str = os.getenv("RESULTS_STORE"),
     metadata_path: str = os.getenv("METADATA_PATH"),
     datasets_path: str = os.getenv("DATASETS_PATH"),
-    selector: Union[Dict, List[str]] = {"frequency": "Monthly"},
+    selector: Union[Dict, List[str]] = SERIES_IDS,
     n_datasets: int = 3,
     batch_size: int = 1,
     train_ratio: int = 3,
