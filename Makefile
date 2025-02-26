@@ -17,7 +17,6 @@ help:
 install:
 	uv sync
 	uv pip install flash-attn --no-build-isolation
-	source .venv/bin/activate
 
 #* Code Formatters
 .PHONY: format

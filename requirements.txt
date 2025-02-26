@@ -1,11 +1,13 @@
 torch
-transformers
 pydantic
 requests
-lm-format-enforcer
 pandas
 pyarrow
 accelerate
 scipy
 python-dotenv
 setuptools
+# deprecated class in 4.49.0 still used in lm-format-enforcer
+# Issue raised here: https://github.com/noamgat/lm-format-enforcer/issues/158
+transformers==4.48.3
+lm-format-enforcer
