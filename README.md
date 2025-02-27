@@ -1,6 +1,6 @@
 <div align="center">
 
-A tool to systematically test LLMs with time-series forecasting and policy NLP tasks.  
+A tool to evaluate LLMs with time-series forecasting and policy NLP tasks.  
 
 **Humun Org**
 
@@ -24,17 +24,19 @@ make install
 > [!Note]
 > If data is no longer available at these paths, consult the Data Collection Notion [here.](https://humanity-unleashed.notion.site/Data-Collection-131d57b83b518183b5ddc38872f6bd6e)
 
-The dataset being used is economic timeseries data scraped from FRED by the Data Collection team. This data has been mounted to the server currently at `/workspace/datasets/fred` and is stored in parquet files. 
+The dataset being used is economic timeseries data scraped from FRED by the Data Collection team. This data has been mounted to the server currently at `/workspace/datasets/fred`.
+
 Data is split into two parts:
 
 1. Time-series data:
-    * contained in a `.parquet` file stored at `/workspaces/datasets/fred/split.parquet`
+    * `/workspaces/datasets/fred/split.parquet`
     * when read into a pd.DataFrame, it assumes the format;   
 ```python 
 Columns: Index(['series_id', 'history', 'forecast'], dtype='object')
 ```
+
 2. Metadata:
-    * ~~contained in a `.csv` file stored at `/workspaces/datasets/fred/all_fred_metadata.csv`~~ (Note: Currently there is no space to store the metadata file on /workspace, it can be downloaded via `humun_benchmark/adhoc/downloadGC.py` after API key has been retrieved from Notion- see file comments for link) 
+    * `/workspaces/datasets/fred/all_fred_metadata.csv`
     * it assumes the format; 
 ```python 
 Data columns (total 16 columns):
@@ -64,7 +66,7 @@ Data columns (total 16 columns):
 > [!Note]
 > Alternative values can be provided at runtime via the benchmark.py or benchmark() parameters.
 
-Contained in `.env` and read-in when `humun_benchmark.utils.checks.check_env()` is imported. 
+Contained in `.env` and loaded by `pydotenv`. 
 
 | Variable Name | Description | Default Value |
 |--------------|-------------|----------------|
