@@ -2,6 +2,7 @@ import logging
 import logging.config
 import logging.handlers
 import atexit
+import time
 
 
 class StdoutFilter(logging.Filter):
@@ -34,13 +35,15 @@ def setup_logging(log_filepath: str = None):
     # `basic_handlers`
     basic_handlers = ["console_stdout", "console_stderr"]
 
+    logging.Formatter.converter = time.gmtime
+
     log_config = {
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
             "detailed": {
                 "format": "[%(asctime)s] %(levelname)s - %(name)s:\n %(message)s\n",
-                "datefmt": "%Y-%m-%d %H:%M:%S",
+                "datefmt": "%Y-%m-%d %H:%M:%S UTC",
             }
         },
         "handlers": {
@@ -74,7 +77,14 @@ def setup_logging(log_filepath: str = None):
                 if log_filepath
                 else basic_handlers,
                 "propagate": True,
-            }
+            },
+            "tests": {
+                "level": "DEBUG",
+                "handlers": basic_handlers + ["output_log"]
+                if log_filepath
+                else basic_handlers,
+                "propagate": True,
+            },
         },
     }
 

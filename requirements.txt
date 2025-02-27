@@ -4,6 +4,7 @@ requests
 pandas
 pyarrow
 accelerate
+matplotlib
 scipy
 python-dotenv
 setuptools

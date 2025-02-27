@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 from pydantic import BaseModel
 
-from humun_benchmark.utils.format import format_timeseries_input
+from humun_benchmark.data.format import format_timeseries_input
 
 
 # Parent class for all prompt methods

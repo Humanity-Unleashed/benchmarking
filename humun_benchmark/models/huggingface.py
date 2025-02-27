@@ -21,10 +21,9 @@ from transformers import (
     AutoModelForCausalLM,
 )
 
-from humun_benchmark.model import Model
+from humun_benchmark.base import Model, ModelLoadError
 from humun_benchmark.prompt import InstructPrompt
-from humun_benchmark.utils.errors import ModelError, ModelLoadError
-from humun_benchmark.utils.parse import parse_forecast_output
+from humun_benchmark.data.parse import parse_forecast_output
 
 log = logging.getLogger(__name__)
 

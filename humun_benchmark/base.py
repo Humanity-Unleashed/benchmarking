@@ -5,9 +5,22 @@ Parent class for model interfaces.
 
 import logging
 
+from typing import Dict, Any
 from humun_benchmark.prompt import Prompt
 
 logger = logging.getLogger(__name__)
+
+
+class ModelError(Exception):
+    pass
+
+
+class InferenceError(ModelError):
+    pass
+
+
+class ModelLoadError(ModelError):
+    pass
 
 
 class Model:

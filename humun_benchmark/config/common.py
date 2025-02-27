@@ -1,4 +1,28 @@
-# Series IDs taken from https://www.stlouisfed.org/research/economists/mccracken/fred-databases
+# ENVIRONMENT VARIABLES
+ENV_VARS = [
+    "DATASETS_PATH",
+    "METADATA_PATH",
+    "RESULTS_STORE",
+    "HF_HOME",
+    "HF_TOKEN_PATH",
+]
+
+
+# TASKS
+NUMERICAL = """
+<task>
+You are an economic time-series forecasting expert. Predict the values at the forecast timestamps given the historical data provided. 
+
+Only provide the forecast in your response in the format (timestamp, value) in between <forecast> and </forecast> tags. Don't include any other information/comments in your response. 
+</task>
+"""
+
+NUMERICAL_W_REASONING = ""
+POLICY_CREATION = ""
+POLICY_CREATION_W_REASONING = ""
+
+
+# DATASET SERIES IDS - https://www.stlouisfed.org/research/economists/mccracken/fred-databases
 SERIES_IDS = [
     "TB6MS",
     "BAAFFM",

@@ -2,27 +2,24 @@ import argparse
 import json
 import logging
 import os
+from datetime import datetime
+from pprint import pformat
+from typing import Dict, List, Union
+
 import torch
 
-from datetime import datetime
-from typing import List, Union, Dict
-from pprint import pformat
-
-from humun_benchmark.interfaces.huggingface import HuggingFace
-from humun_benchmark.prompt import InstructPrompt
-from humun_benchmark.metrics import compute_dataset_metrics, compute_forecast_metrics
-from humun_benchmark.utils.checks import check_env
-from humun_benchmark.utils.log_config import setup_logging
-from humun_benchmark.utils.tasks import NUMERICAL
-from humun_benchmark.utils.format import truncate_dataset
-from humun_benchmark.utils.get_data import (
-    get_data,
-    get_series_by_id,
-    get_dataset_info,
+from humun_benchmark.config.checks import check_env
+from humun_benchmark.config.common import NUMERICAL, SERIES_IDS
+from humun_benchmark.config.logs import setup_logging
+from humun_benchmark.data.format import truncate_dataset
+from humun_benchmark.data.get_data import (
     convert_array_to_df,
+    get_data,
+    get_dataset_info,
+    get_series_by_id,
 )
-from humun_benchmark.utils.series_ids import SERIES_IDS
-
+from humun_benchmark.models.huggingface import HuggingFace
+from humun_benchmark.prompt import InstructPrompt
 
 # load .env and check needed variables exist
 check_env()
@@ -150,40 +147,16 @@ def benchmark(
             # store metadata
             dataset_info["metadata"] = data["metadata"]
 
-            # compute and store dataset-specific metrics
-            dataset_info["dataset_metrics"] = compute_dataset_metrics(prompt.results_df)
-
             # store dataset-specific benchmark info
             model_benchmark["forecasts"][series_id] = dataset_info
 
             # store DataFrame for cross-dataset metrics
             all_forecasts_dfs.append(prompt.results_df)
 
-            device = torch.device("cuda:0")
-
-            # Log before clearing cache
-            before_reserved = torch.cuda.memory_reserved(device)
-            before_allocated = torch.cuda.memory_allocated(device)
-            log.info(
-                f"Before empty_cache(): Allocated = {before_allocated / (1024**2):.2f} MB, "
-                f"Reserved = {before_reserved / (1024**2):.2f} MB"
-            )
             del prompt
             torch.cuda.empty_cache()
-            # Log after clearing cache
-            after_reserved = torch.cuda.memory_reserved(device)
-            after_allocated = torch.cuda.memory_allocated(device)
-            cleared = before_reserved - after_reserved
-            log.info(
-                f"After empty_cache(): Allocated = {after_allocated / (1024**2):.2f} MB, "
-                f"Reserved = {after_reserved / (1024**2):.2f} MB, "
-                f"Cleared = {cleared / (1024**2):.2f} MB"
-            )
 
-        # compute and store global metrics for this model
-        model_benchmark["global_metrics"] = compute_forecast_metrics(all_forecasts_dfs)
-
-        # save results to <modelname>.json
+        # save results to output_path/<modelname>.json
         json_path = f"{output_path}/{llm.label}.json"
         with open(json_path, "w") as f:
             json.dump(model_benchmark, f)
