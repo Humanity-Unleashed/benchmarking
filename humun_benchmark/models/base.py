@@ -6,7 +6,7 @@ Parent class for model interfaces.
 import logging
 
 from typing import Dict, Any
-from humun_benchmark.prompt import Prompt
+from humun_benchmark.prompts import Prompt
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +32,7 @@ class Model:
         logger.exception("'_load_model' must be implemented in subclass.")
         raise NotImplementedError("'_load_model' must be implemented in subclass.")
 
-    def inference(
-        self, prompt_instance: Prompt, n_runs: int, temperature: float
-    ) -> None:
+    def inference(self, prompt_instance: Prompt, n_runs: int, temperature: float) -> None:
         """
         in-place method that appends inference responses to Prompt instance
         """

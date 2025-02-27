@@ -21,9 +21,9 @@ from transformers import (
     AutoModelForCausalLM,
 )
 
-from humun_benchmark.base import Model, ModelLoadError
-from humun_benchmark.prompt import InstructPrompt
-from humun_benchmark.data.parse import parse_forecast_output
+from humun_benchmark.models import Model, ModelLoadError
+from humun_benchmark.prompts import InstructPrompt
+from humun_benchmark.data.formatting import parse_forecast_output
 
 log = logging.getLogger(__name__)
 
@@ -50,9 +50,7 @@ def get_model_and_tokenizer(llm):
     # case-specific model/tokenizer loaders
     try:
         if "llama-3" in llm:
-            tokenizer = AutoTokenizer.from_pretrained(
-                llm, padding_side="left", legacy=False
-            )
+            tokenizer = AutoTokenizer.from_pretrained(llm, padding_side="left", legacy=False)
             model = LlamaForCausalLM.from_pretrained(
                 llm,
                 device_map="auto",
@@ -115,7 +113,7 @@ class HuggingFace(Model):
 
         if constrained_decoding:
             # Get the last n_timesteps timestamps for forecasting
-            future_timestamps = payload.timeseries.iloc[-payload.n_timesteps :]["date"]
+            future_timestamps = payload.timeseries.iloc[-payload.n_steps :]["date"]
 
         def constrained_decoding_regex(required_timestamps):
             """
@@ -133,9 +131,7 @@ class HuggingFace(Model):
 
         # Build a regex parser with the generated regex
         parser = RegexParser(constrained_decoding_regex(future_timestamps))
-        prefix_function = build_transformers_prefix_allowed_tokens_fn(
-            self.pipeline.tokenizer, parser
-        )
+        prefix_function = build_transformers_prefix_allowed_tokens_fn(self.pipeline.tokenizer, parser)
 
         # Log info for debugging
         log.info(f"Running inference on {self.model.device} for {n_runs} time/s.")

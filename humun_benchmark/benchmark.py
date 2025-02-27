@@ -8,11 +8,10 @@ from typing import Dict, List, Union
 
 import torch
 
-from humun_benchmark.config.checks import check_env
 from humun_benchmark.config.common import NUMERICAL, SERIES_IDS
 from humun_benchmark.config.logs import setup_logging
-from humun_benchmark.data.format import truncate_dataset
-from humun_benchmark.data.get_data import (
+from humun_benchmark.data.preprocessing import truncate_dataset
+from humun_benchmark.data.reading import (
     convert_array_to_df,
     get_data,
     get_dataset_info,
@@ -21,8 +20,6 @@ from humun_benchmark.data.get_data import (
 from humun_benchmark.models.huggingface import HuggingFace
 from humun_benchmark.prompt import InstructPrompt
 
-# load .env and check needed variables exist
-check_env()
 
 # timestamp for output files
 time = datetime.now().strftime("%Y%m%d_%H%M%S")

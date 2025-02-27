@@ -9,12 +9,8 @@ version = "0.0.0"
 readme = "README.md"
 requires-python = ">3.9, <3.12"
 
-authors = [
-    {name = ""},
-]
-maintainers = [
-    {name = "Aiden Lewington", email = "aidenlewington@gmail.com"},
-]
+authors = [{ name = "" }]
+maintainers = [{ name = "Aiden Lewington", email = "aidenlewington@gmail.com" }]
 
 dynamic = ["dependencies"]
 
@@ -22,5 +18,7 @@ dynamic = ["dependencies"]
 packages = { find = { where = ["."] } }
 
 [tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+dependencies = { file = ["requirements.txt"] }
 
+[tool.ruff]
+line-length = 105
