@@ -35,12 +35,7 @@ def compute_dataset_metrics(df: pd.DataFrame) -> Dict:
     # Handle zero values in MAPE calculation
     non_zero_mask = actuals != 0
     if np.any(non_zero_mask):
-        mape = (
-            np.mean(
-                np.abs(forecast_errors[non_zero_mask] / actuals[non_zero_mask, None])
-            )
-            * 100
-        )
+        mape = np.mean(np.abs(forecast_errors[non_zero_mask] / actuals[non_zero_mask, None])) * 100
     else:
         mape = np.nan  # or some other fallback
 
@@ -55,9 +50,7 @@ def compute_dataset_metrics(df: pd.DataFrame) -> Dict:
     }
 
 
-def compute_cross_dataset_metrics(
-    forecasts: List[np.ndarray], actuals: List[np.ndarray]
-) -> Dict:
+def compute_cross_dataset_metrics(forecasts: List[np.ndarray], actuals: List[np.ndarray]) -> Dict:
     """
     Computes metrics that need all datasets together.
     """
@@ -71,9 +64,7 @@ def compute_cross_dataset_metrics(
     avg_rank = np.mean(ranks)
 
     # CRPS across all datasets
-    crps_values = [
-        crps_closed_form(obs, fc) for obs, fc in zip(all_actuals, all_forecasts)
-    ]
+    crps_values = [crps_closed_form(obs, fc) for obs, fc in zip(all_actuals, all_forecasts)]
     avg_crps = np.mean(crps_values)
 
     # Distribution metrics
@@ -102,18 +93,11 @@ def compute_forecast_metrics(dfs: Union[pd.DataFrame, List[pd.DataFrame]]) -> Di
     # Weight averageable metrics by dataset size
     total_samples = sum(m["n_samples"] for m in dataset_metrics)
     weighted_metrics = {
-        "MAE": float(
-            sum(m["MAE"] * m["n_samples"] for m in dataset_metrics) / total_samples
-        ),
+        "MAE": float(sum(m["MAE"] * m["n_samples"] for m in dataset_metrics) / total_samples),
         "RMSE": float(
-            np.sqrt(
-                sum((m["RMSE"] ** 2 * m["n_samples"]) for m in dataset_metrics)
-                / total_samples
-            )
+            np.sqrt(sum((m["RMSE"] ** 2 * m["n_samples"]) for m in dataset_metrics) / total_samples)
         ),
-        "MAPE": float(
-            sum(m["MAPE"] * m["n_samples"] for m in dataset_metrics) / total_samples
-        ),
+        "MAPE": float(sum(m["MAPE"] * m["n_samples"] for m in dataset_metrics) / total_samples),
     }
 
     # Compute cross-dataset metrics (convert back to np for metrics)

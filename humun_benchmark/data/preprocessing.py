@@ -4,7 +4,7 @@ import os
 import logging
 import ast
 
-from humun_benchmark.config.common import SERIES_IDS
+from humun_benchmark.config.common import MONTHLY_SERIES_IDS
 
 
 log = logging.getLogger(__name__)
@@ -37,18 +37,15 @@ def truncate_dataset(
     return truncated_df
 
 
-# TODO : need metadata.csv? fred.parquet contains some metadata
 def load_from_parquet(
     series_ids: List[str],
     datasets_path: str = os.getenv("DATASETS_PATH"),
     n_datasets: int = None,
     forecast_steps: int = 6,
     train_ratio: int = 3,
-    require_metadata: str = None,
 ) -> Dict[str, Dict]:
     """
-    Get timeseries data for specific series IDs, split into history and forecast based on
-    params provided.
+    Get timeseries data for specific series IDs, split into history and forecast.
 
     Args:
         series_ids: List of series IDs to retrieve.
@@ -56,23 +53,14 @@ def load_from_parquet(
         n_datasets: Limits the number of series to use.
         forecast_steps: Number of timesteps in forecast.
         train_ratio: Multiplier for training data (i.e. ratio of 3 * 6 = 18 training timesteps)
-        require_metadata: Filepath of metadata - checks if series ID is contained in metadata,
-            excluding from returned dictionary if not.
 
     Returns:
         Dictionary of format:
-            { "id1": { "history": pd.DataFrame, "forecast": pd.DataFrame },
+            { "id1": { "history": pd.DataFrame, "forecast": pd.DataFrame, "title": str, "notes" : str },
               "id2": ... }
     """
 
-    # if required, check if metadata exists
-    if require_metadata:
-        missing = set(series_ids) - set(pd.read_csv(require_metadata)["id"])
-        if missing:
-            log.warning(f"Skipping series IDs without metadata: {list(missing)}.")
-            series_ids = [sid for sid in series_ids if sid not in missing]
-        if not series_ids:
-            raise ValueError("No valid series IDs remain after checking metadata.")
+    # TODO: check for empty data (i.e. if series_id doesn't exist but returns from pd.read_parquet)
 
     if n_datasets is not None:
         if n_datasets > len(series_ids):
@@ -102,38 +90,15 @@ def load_from_parquet(
             # truncate data
             history, forecast = truncate_dataset(timeseries_df, train_ratio, forecast_steps)
 
-            result[sid] = {"history": history, "forecast": forecast}
+            title, notes = series_dict["title"], series_dict["notes"]
+
+            result[sid] = {"history": history, "forecast": forecast, "title": title, "notes": notes}
 
         except (KeyError, IndexError) as e:
             log.warning(f"Error processing series {sid}: {str(e)}")
             continue
 
     return result
-
-
-# def get_dataset_info(fred_data: dict):
-#     """
-#     Create formatted strings for each series with their details.
-#
-#     Args:
-#         fred_data (Dict[str, Dict]) : a dictionary containing, for each series ID, it's
-#         metadata and timeseries data. Note this is a processed subset of the fred data-source.
-#
-#     Returns:
-#         A formatted string with dataset info for logging.
-#     """
-#     series_details = []
-#     for series_id, data in fred_data.items():
-#         length = len(data["timeseries"])
-#         frequency = data["metadata"].get("frequency", "Unknown")
-#         title = data["metadata"].get("title", "Unknown")
-#
-#         detail_str = f"Series ID: {series_id}\n  Length: {length} points\n  Frequency: {frequency}\n  Title: {title}\n"
-#         series_details.append(detail_str)
-#
-#     # Join all details with a separator line.
-#     separator = "-" * 50 + "\n"
-#     return separator.join(series_details)
 
 
 if __name__ == "__main__":
@@ -145,7 +110,7 @@ if __name__ == "__main__":
     )
 
     result = load_from_parquet(
-        series_ids=SERIES_IDS,
+        series_ids=MONTHLY_SERIES_IDS,
         datasets_path="/workspace/datasets/fred/fred.parquet",
         require_metadata="/workspace/datasets/fred/all_fred_metadata.csv",
     )

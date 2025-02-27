@@ -23,7 +23,7 @@ POLICY_CREATION_W_REASONING = ""
 
 
 # DATASET SERIES IDS - https://www.stlouisfed.org/research/economists/mccracken/fred-databases
-SERIES_IDS = [
+MONTHLY_SERIES_IDS = [
     "TB6MS",
     "BAAFFM",
     "AAAFFM",

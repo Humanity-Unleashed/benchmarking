@@ -73,16 +73,12 @@ def setup_logging(log_filepath: str = None):
         "loggers": {
             "humun_benchmark": {
                 "level": "DEBUG",
-                "handlers": basic_handlers + ["output_log"]
-                if log_filepath
-                else basic_handlers,
+                "handlers": basic_handlers + ["output_log"] if log_filepath else basic_handlers,
                 "propagate": True,
             },
             "tests": {
                 "level": "DEBUG",
-                "handlers": basic_handlers + ["output_log"]
-                if log_filepath
-                else basic_handlers,
+                "handlers": basic_handlers + ["output_log"] if log_filepath else basic_handlers,
                 "propagate": True,
             },
         },

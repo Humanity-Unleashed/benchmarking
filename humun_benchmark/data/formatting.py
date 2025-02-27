@@ -38,9 +38,7 @@ def format_timeseries_input(df: pd.DataFrame, n_timesteps: int) -> str:
 
     # Ensure the 'date' column is in daily 'YYYY-MM-DD' format
     try:
-        df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d").dt.strftime(
-            "%Y-%m-%d"
-        )
+        df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d").dt.strftime("%Y-%m-%d")
     except Exception as e:
         raise ValueError(f"Date column contains invalid formats: {e}")
 
@@ -49,14 +47,10 @@ def format_timeseries_input(df: pd.DataFrame, n_timesteps: int) -> str:
     history = df.iloc[:-n_timesteps]
     forecast = df.iloc[n_timesteps:]
 
-    history_formatted = "\n".join(
-        f"({row['date']}, {row['value']})" for _, row in history.iterrows()
-    )
+    history_formatted = "\n".join(f"({row['date']}, {row['value']})" for _, row in history.iterrows())
     history_section = f"<history>\n{history_formatted}\n</history>"
 
-    forecast_formatted = "\n".join(
-        f"({row['date']}, x)" for _, row in forecast.iterrows()
-    )
+    forecast_formatted = "\n".join(f"({row['date']}, x)" for _, row in forecast.iterrows())
     forecast_section = f"<forecast>\n{forecast_formatted}\n</forecast>"
 
     return f"{history_section}\n{forecast_section}"
@@ -67,10 +61,7 @@ def format_output_regex(timestamps):
     Regex-enforced model output using a list of timestamps.
     """
     timestamp_regex = "".join(
-        [
-            r"\(\s*{}\s*,\s*[-+]?\d+(\.\d+)?\)\n".format(re.escape(ts))
-            for ts in timestamps
-        ]
+        [r"\(\s*{}\s*,\s*[-+]?\d+(\.\d+)?\)\n".format(re.escape(ts)) for ts in timestamps]
     )
     return r"<forecast>\n{}<\/forecast>".format(timestamp_regex)
 

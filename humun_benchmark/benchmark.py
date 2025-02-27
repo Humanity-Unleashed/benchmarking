@@ -18,7 +18,7 @@ from humun_benchmark.data.reading import (
     get_series_by_id,
 )
 from humun_benchmark.models.huggingface import HuggingFace
-from humun_benchmark.prompt import InstructPrompt
+from humun_benchmark.prompts import InstructPrompt
 
 
 # timestamp for output files
@@ -117,14 +117,10 @@ def benchmark(
 
             timeseries_df = convert_array_to_df(fred_data[series_id]["timeseries"])
 
-            timeseries_df = truncate_dataset(
-                timeseries_df, train_ratio=train_ratio, n_steps=n_steps
-            )
+            timeseries_df = truncate_dataset(timeseries_df, train_ratio=train_ratio, n_steps=n_steps)
 
             # create a prompt - TODO: remove data pre-processing from prompt.
-            prompt = InstructPrompt(
-                task=NUMERICAL, timeseries=timeseries_df, n_steps=n_steps
-            )
+            prompt = InstructPrompt(task=NUMERICAL, timeseries=timeseries_df, n_steps=n_steps)
 
             # store prompt token amount for analysis
             prompt_length = len(llm.tokenizer.encode(prompt.prompt_text))
@@ -137,9 +133,7 @@ def benchmark(
             llm.inference(payload=prompt, n_runs=batch_size)
 
             # store results  (TODO: currently overrides results_df on each inference)
-            dataset_info["results"] = prompt.results_df.to_json(
-                orient="records", date_format="iso"
-            )
+            dataset_info["results"] = prompt.results_df.to_json(orient="records", date_format="iso")
 
             # store metadata
             dataset_info["metadata"] = data["metadata"]
@@ -161,9 +155,7 @@ def benchmark(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Run benchmarks for Instruct LLMs on time series data."
-    )
+    parser = argparse.ArgumentParser(description="Run benchmarks for Instruct LLMs on time series data.")
     parser.add_argument(
         "--models",
         type=str,
