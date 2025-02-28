@@ -46,6 +46,7 @@ def benchmark(
 
     # write logs to output path
     setup_logging(os.path.join(output_path, f"{timestamp}.log"))
+    log = logging.getLogger(__name__)
 
     # Log the selection method being used
     params = {
@@ -122,17 +123,21 @@ def benchmark(
 
 
 if __name__ == "__main__":
-    setup_logging()
-    log = logging.getLogger("humun_benchmark.benchmark")
-
     models = [
         "Qwen/Qwen2.5-1.5B-Instruct",
         "Qwen/Qwen2.5-3B-Instruct",
         "Qwen/Qwen2.5-7B-Instruct",
-        "Llama-3.2-1B-Instruct",
-        "Llama-3.2-3B-Instruct",
-        "LLama-3.1-8B-Instruct",
+        # "meta-llama/Llama-3.2-1B-Instruct",
+        # "meta-llama/Llama-3.2-3B-Instruct",
+        "meta-llama/Llama-3.1-8B-Instruct",
         "Ministral-8B-Instruct-2410",
     ]
 
-    benchmark(models=models, series_ids=MD_VINTAGE_IDS_MONTHLY, n_datasets=20, batch_size=10)
+    benchmark(
+        models=models,
+        series_ids=MD_VINTAGE_IDS_MONTHLY,
+        n_datasets=20,
+        batch_size=10,
+        train_ratio=3,
+        forecast_steps=12,
+    )
