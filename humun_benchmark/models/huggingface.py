@@ -6,9 +6,10 @@ LMs configured with Flash-Attention-2 for efficiency:
     - https://huggingface.co/docs/transformers/perf_infer_gpu_one#flashattention-2
 """
 
-from pprint import pformat
 import logging
 import re
+from pprint import pformat
+from typing import Optional
 
 import torch
 from lmformatenforcer import RegexParser
@@ -16,15 +17,15 @@ from lmformatenforcer.integrations.transformers import (
     build_transformers_prefix_allowed_tokens_fn,
 )
 from transformers import (
+    AutoModelForCausalLM,
     AutoTokenizer,
     LlamaForCausalLM,
     pipeline,
-    AutoModelForCausalLM,
 )
 
+from humun_benchmark.data.formatting import parse_forecast_output
 from humun_benchmark.models import Model, ModelLoadError
 from humun_benchmark.prompts import InstructPrompt
-from humun_benchmark.data.formatting import parse_forecast_output
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ DEFAULT_BOS_TOKEN = "<s>"
 DEFAULT_UNK_TOKEN = "<unk>"
 
 
-def get_model_and_tokenizer(llm):
+def get_model_and_tokenizer(llm, cuda):
     """
     Returns
 
@@ -54,14 +55,14 @@ def get_model_and_tokenizer(llm):
             tokenizer = AutoTokenizer.from_pretrained(llm, padding_side="left", legacy=False)
             model = LlamaForCausalLM.from_pretrained(
                 llm,
-                device_map="auto",
+                device_map=cuda,
                 torch_dtype=torch.float16,
                 attn_implementation="flash_attention_2",
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 llm,
-                device_map="auto",
+                device_map=cuda,
                 torch_dtype=torch.float16,
             )
             tokenizer = AutoTokenizer.from_pretrained(llm)
@@ -90,31 +91,33 @@ class HuggingFace(Model):
     Configures and handles Hugging Face LLM inference.
     """
 
+    def __init__(self, label: str, cuda: Optional[int] = None):
+        # device_map
+        self.cuda = {"": f"cuda:{cuda}"} if isinstance(cuda, int) else "auto"
+        super().__init__(label)
+
     def _load_model(self):
-        self.model, self.tokenizer = get_model_and_tokenizer(self.label)
+        self.model, self.tokenizer = get_model_and_tokenizer(self.label, self.cuda)
+
         # Create the pipeline once during model loading
         self.pipeline = pipeline(
             task="text-generation",
             model=self.model,
             tokenizer=self.tokenizer,
-            device_map="auto",
+            device_map=self.cuda,
         )
 
     @torch.inference_mode()
     def inference(
         self,
         payload: InstructPrompt,
-        n_runs=1,
+        batch_size=1,
         temperature=1.0,
-        constrained_decoding=True,
-        **kwargs,
     ):
         """Appends inference output to `payload.responses` and the resultant
-        dataframe to `payload.results_df`"""
+        dataframe to `payload.results`"""
 
-        if constrained_decoding:
-            # Get the last n_timesteps timestamps for forecasting
-            future_timestamps = payload.timeseries.iloc[-payload.n_steps :]["date"]
+        future_timestamps = payload.forecast["date"]
 
         def constrained_decoding_regex(required_timestamps):
             """
@@ -134,16 +137,13 @@ class HuggingFace(Model):
         parser = RegexParser(constrained_decoding_regex(future_timestamps))
         prefix_function = build_transformers_prefix_allowed_tokens_fn(self.pipeline.tokenizer, parser)
 
-        # Log info for debugging
-        log.info(f"Running inference on {self.model.device} for {n_runs} time/s.")
-
         # Use the pre-created pipeline (self.pipeline) for inference.
         for response in self.pipeline(
-            [payload.prompt_text] * n_runs,
+            [payload.prompt_text] * batch_size,
             max_new_tokens=6000,  # Limit response length
             temperature=temperature,
             prefix_allowed_tokens_fn=prefix_function,
-            batch_size=n_runs,
+            batch_size=batch_size,
         ):
             output_start = len(payload.prompt_text)
             forecast_output = response[0]["generated_text"][output_start:]
@@ -151,7 +151,7 @@ class HuggingFace(Model):
 
         # Turn text responses into a results dataframe
         dfs = [parse_forecast_output(df) for df in payload.responses]
-        payload.merge_forecasts(dfs)  # Sets payload.results_df in-place
+        payload.merge_forecasts(dfs)  # Sets payload.results in-place
 
     def serialise(self):
         """

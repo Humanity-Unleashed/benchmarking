@@ -87,7 +87,7 @@ class InstructPrompt(Prompt):
         self.forecast["date"] = pd.to_datetime(self.forecast["date"])
 
         # Merge with original forecast values to obtain actual value column for metrics
-        self.results_df = pd.merge(
+        self.results = pd.merge(
             merged_df,
             self.forecast[["date", "value"]],
             on="date",
