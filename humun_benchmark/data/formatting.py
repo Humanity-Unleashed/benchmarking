@@ -6,12 +6,10 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 
-def format_timeseries_input(df: pd.DataFrame, n_timesteps: int) -> str:
+def format_timeseries_input(history: pd.DataFrame, forecast: pd.DataFrame) -> str:
     """
-    Formats and returns the timeseries history used by the model to forecast
+    Formats and returns the a string of the timeseries history used by the transformer to forecast
     unseen timestamp values.
-
-    https://github.com/ServiceNow/context-is-key-forecasting/blob/main/cik_benchmark/baselines/direct_prompt.py#L99C5-L112C69
 
     Example:
 
@@ -21,31 +19,22 @@ def format_timeseries_input(df: pd.DataFrame, n_timesteps: int) -> str:
     (t3, v3)
     </history>
     <forecast>
-    (t4, v4)
-    (t5, v5)
+    (t4, x)
+    (t5, x)
     </forecast>
     """
 
-    if "date" not in df.columns or "value" not in df.columns:
-        raise ValueError("DataFrame must contain 'date' and 'value' columns.")
-    if not isinstance(n_timesteps, int) or n_timesteps < 1:
-        raise ValueError("n_timesteps must be a positive integer")
-    if n_timesteps >= len(df):
-        raise ValueError("n_timesteps cannot be larger than length of timeseries")
+    for name, df in [("history", history), ("forecast", forecast)]:
+        if "date" not in df.columns or "value" not in df.columns:
+            raise ValueError(f"{name} DataFrame must contain 'date' and 'value' columns.")
 
-    # Ensure sorted by date
-    df = df.sort_values(by="date", ascending=True)
+        df.sort_values(by="date", ascending=True, inplace=True)
 
-    # Ensure the 'date' column is in daily 'YYYY-MM-DD' format
-    try:
-        df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d").dt.strftime("%Y-%m-%d")
-    except Exception as e:
-        raise ValueError(f"Date column contains invalid formats: {e}")
-
-    # Split data for forecasting
-    # TODO: add optional history shortener (e.g. give 5 yrs instead of 40+)
-    history = df.iloc[:-n_timesteps]
-    forecast = df.iloc[n_timesteps:]
+        # Ensure 'date' column is in daily 'YYYY-MM-DD' format
+        try:
+            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+        except Exception as e:
+            raise ValueError(f"{name} DataFrame contains invalid date formats: {e}")
 
     history_formatted = "\n".join(f"({row['date']}, {row['value']})" for _, row in history.iterrows())
     history_section = f"<history>\n{history_formatted}\n</history>"

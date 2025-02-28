@@ -1,40 +1,29 @@
-import argparse
-import json
 import logging
 import os
 from datetime import datetime
-from pprint import pformat
-from typing import Dict, List, Union
+from typing import List
 
 import torch
 
-from humun_benchmark.config.common import NUMERICAL, SERIES_IDS
-from humun_benchmark.config.logs import setup_logging
-from humun_benchmark.data.preprocessing import truncate_dataset
-from humun_benchmark.data.reading import (
-    convert_array_to_df,
-    get_data,
-    get_dataset_info,
-    get_series_by_id,
-)
-from humun_benchmark.models.huggingface import HuggingFace
+from humun_benchmark.config import MD_VINTAGE_IDS_MONTHLY, NUMERICAL, setup_logging
+from humun_benchmark.data import load_from_parquet
+from humun_benchmark.models import HuggingFace
 from humun_benchmark.prompts import InstructPrompt
 
+import dotenv
 
-# timestamp for output files
-time = datetime.now().strftime("%Y%m%d_%H%M%S")
+dotenv.load_dotenv()
 
 
 def benchmark(
     models: list[str] = ["llama-3.1-8b-instruct"],
     output_path: str = os.getenv("RESULTS_STORE"),
-    metadata_path: str = os.getenv("METADATA_PATH"),
     datasets_path: str = os.getenv("DATASETS_PATH"),
-    selector: Union[Dict, List[str]] = SERIES_IDS,
-    n_datasets: int = 3,
+    series_ids=List[str],
+    n_datasets: int = None,
     batch_size: int = 1,
     train_ratio: int = 3,
-    n_steps: int = 12,
+    forecast_steps: int = 12,
 ) -> None:
     """
     Run benchmarks on time series data, selecting data either by filters or series IDs.
@@ -42,199 +31,49 @@ def benchmark(
     Args:
         models: List of model names to benchmark
         output_path: Where to store results
-        metadata_path: Path to metadata
         datasets_path: Path to time series data
-        selector: Either dict of filters or list of series IDs
+        series_ids: List of series IDs from FRED data
         n_datasets: Number of datasets to retrieve (used with filters)
         batch_size: Number of runs per inference
         train_ratio: Multiplier for training period
-        n_steps: Number of forecast steps
+        forecast_steps: Number of forecast steps
     """
 
-    # Validate required paths
-    if not all([datasets_path, metadata_path]):
-        raise ValueError(
-            "datasets_path and metadata_path must be provided either via arguments or environment variables"
-        )
-
-    # Setup output directory and logging
-    output_path = output_path or os.getenv("RESULTS_STORE")
-    output_path = os.path.join(output_path, time)
-    os.makedirs(output_path, exist_ok=True)
-    setup_logging(f"{output_path}/benchmark.log")
-    log = logging.getLogger("humun_benchmark.benchmark")
-
     # Log the selection method being used
-    selection_method = "series_ids" if isinstance(selector, list) else "filters"
     params = {
-        "datasets_path": datasets_path,
-        "metadata_path": metadata_path,
-        "output_path": output_path,
-        f"{selection_method}": selector,
-        "n_datasets": n_datasets,
         "models": models,
+        "output_path": output_path,
+        "datasets_path": datasets_path,
+        "series_ids": series_ids[:n_datasets] if n_datasets else series_ids,
+        "n_datasets": n_datasets,
         "batch_size": batch_size,
+        "train_ratio": train_ratio,
+        "forecast_steps": forecast_steps,
     }
-    log.info(f"Benchmark Parameters:\n{pformat(params)}")
-
-    log.info("Reading in Metadata and Datasets...")
+    params_str = "\n".join(f"\t{k}: {v}" for k, v in params.items())
+    log.info(f"Benchmark Parameters: {{\n{params_str}\n}}")
 
     # Get data based on selector type
-    if isinstance(selector, list):
-        fred_data = get_series_by_id(
-            series_ids=selector,
-            datasets_path=datasets_path,
-            metadata_path=metadata_path,
-        )
-    else:
-        fred_data = get_data(
-            n_datasets=n_datasets,
-            datasets_path=datasets_path,
-            metadata_path=metadata_path,
-            filters=selector,
-        )
+    fred_data = load_from_parquet(
+        series_ids=series_ids,
+        datasets_path=datasets_path,
+        n_datasets=n_datasets,
+        forecast_steps=forecast_steps,
+        train_ratio=train_ratio,
+    )
 
-    # Log data info: series selected
-    log.info(get_dataset_info(fred_data))
-
-    # for each model
-    for model in models:
-        log.info(f"Loading Model: {model}")
-        # create model instance and log config
-        llm = HuggingFace(model)
-        model_info = pformat(llm.serialise())
-        log.info(f"Model Info:\n{model_info}")
-
-        model_benchmark = {}
-        model_benchmark["model_info"] = model_info
-        model_benchmark["forecasts"] = {}
-
-        all_forecasts_dfs = []  # store all forecast DataFrames for cross-dataset metrics
-
-        # for each timeseries in data selected
-        for series_id, data in fred_data.items():
-            dataset_info = {}
-
-            timeseries_df = convert_array_to_df(fred_data[series_id]["timeseries"])
-
-            timeseries_df = truncate_dataset(timeseries_df, train_ratio=train_ratio, n_steps=n_steps)
-
-            # create a prompt - TODO: remove data pre-processing from prompt.
-            prompt = InstructPrompt(task=NUMERICAL, timeseries=timeseries_df, n_steps=n_steps)
-
-            # store prompt token amount for analysis
-            prompt_length = len(llm.tokenizer.encode(prompt.prompt_text))
-            dataset_info["prompt_length"] = prompt_length
-            log.info(
-                f"Prompting {model} for Series ID: {series_id}\n Prompt Tokens Length: {prompt_length}"
-            )
-
-            # run inference
-            llm.inference(payload=prompt, n_runs=batch_size)
-
-            # store results  (TODO: currently overrides results_df on each inference)
-            dataset_info["results"] = prompt.results_df.to_json(orient="records", date_format="iso")
-
-            # store metadata
-            dataset_info["metadata"] = data["metadata"]
-
-            # store dataset-specific benchmark info
-            model_benchmark["forecasts"][series_id] = dataset_info
-
-            # store DataFrame for cross-dataset metrics
-            all_forecasts_dfs.append(prompt.results_df)
-
-            del prompt
-            torch.cuda.empty_cache()
-
-        # save results to output_path/<modelname>.json
-        json_path = f"{output_path}/{llm.label}.json"
-        with open(json_path, "w") as f:
-            json.dump(model_benchmark, f)
-        log.info(f"Results saved to: {json_path}")
+    for series_id, data in fred_data.items():
+        log.info(data["dataset_info"])
+        prompt = InstructPrompt(task=NUMERICAL, history=data["history"], forecast=data["forecast"])
+        log.info(f" ID: {series_id} Prompt text:\n {prompt.prompt_text}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run benchmarks for Instruct LLMs on time series data.")
-    parser.add_argument(
-        "--models",
-        type=str,
-        nargs="+",
-        default=["llama-3.1-8b-instruct"],
-        help="List of models to benchmark",
-    )
-    parser.add_argument(
-        "--output_path",
-        type=str,
-        default=os.getenv("RESULTS_STORE"),
-        help="Directory to save benchmark results",
-    )
-    parser.add_argument(
-        "--metadata_path",
-        type=str,
-        default=os.getenv("METADATA_PATH"),
-        help="Path to CSV file containing metadata",
-    )
-    parser.add_argument(
-        "--datasets_path",
-        type=str,
-        default=os.getenv("DATASETS_PATH"),
-        help="Path to parquet file containing time series data",
-    )
-    parser.add_argument(
-        "--series_ids",
-        type=str,
-        nargs="+",
-        help="List of series IDs to benchmark",
-    )
-    parser.add_argument(
-        "--filters",
-        type=json.loads,
-        default='{"frequency": "Monthly"}',
-        help='JSON string of filters e.g. \'{"frequency": "Monthly"}\'',
-    )
-    parser.add_argument(
-        "--n_datasets",
-        type=int,
-        default=3,
-        help="Number of datasets to retrieve when using filters",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=1,
-        help="Number of inferences per dataset",
-    )
-    parser.add_argument(
-        "--n_steps",
-        type=int,
-        default=12,
-        help="Number of forecast steps (default: 12).",
-    )
-    parser.add_argument(
-        "--train_ratio",
-        type=int,
-        default=3,
-        help="Training ratio (default: 3).",
-    )
-    args = parser.parse_args()
+    setup_logging()
+    log = logging.getLogger("humun_benchmark.benchmark")
 
-    # Determine selector based on provided arguments
-    if args.series_ids:
-        selector = args.series_ids
-        n_datasets = None
-    else:
-        selector = args.filters
-        n_datasets = args.n_datasets
+    log.info("Running benchmark().")
 
-    # Remove selector-related args before passing to benchmark
-    vars_dict = vars(args)
-    del vars_dict["series_ids"]
-    del vars_dict["filters"]
-    del vars_dict["n_datasets"]
+    benchmark(series_ids=MD_VINTAGE_IDS_MONTHLY, n_datasets=3)
 
-    benchmark(selector=selector, n_datasets=n_datasets, **vars_dict)
-
-
-# Usage example:
-#  python humun_benchmark/benchmark.py --datasets_path '../split.parquet' --metadata_path '../all_fred_metadata.csv' --output_path . --models llama-3.1-8b-instruct -n_datasets=1 -batch_size=5
+    log.info("Benchmark completed.")

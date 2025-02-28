@@ -37,6 +37,29 @@ def setup_logging(log_filepath: str = None):
 
     logging.Formatter.converter = time.gmtime
 
+    handlers = {
+        "console_stdout": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "formatter": "detailed",
+            "filters": ["stdout_filter"],
+        },
+        "console_stderr": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+            "formatter": "detailed",
+            "filters": ["stderr_filter"],
+        },
+    }
+
+    if log_filepath:
+        handlers["output_log"] = {
+            "class": "logging.FileHandler",
+            "filename": log_filepath,
+            "mode": "a",
+            "formatter": "detailed",
+        }
+
     log_config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -46,26 +69,7 @@ def setup_logging(log_filepath: str = None):
                 "datefmt": "%Y-%m-%d %H:%M:%S UTC",
             }
         },
-        "handlers": {
-            "console_stdout": {
-                "class": "logging.StreamHandler",
-                "stream": "ext://sys.stdout",
-                "formatter": "detailed",
-                "filters": ["stdout_filter"],
-            },
-            "console_stderr": {
-                "class": "logging.StreamHandler",
-                "stream": "ext://sys.stderr",
-                "formatter": "detailed",
-                "filters": ["stderr_filter"],
-            },
-            "output_log": {
-                "class": "logging.FileHandler",
-                "filename": log_filepath,
-                "mode": "a",
-                "formatter": "detailed",
-            },
-        },
+        "handlers": handlers,
         "filters": {
             "stdout_filter": {"()": StdoutFilter},
             "stderr_filter": {"()": StderrFilter},
@@ -73,12 +77,12 @@ def setup_logging(log_filepath: str = None):
         "loggers": {
             "humun_benchmark": {
                 "level": "DEBUG",
-                "handlers": basic_handlers + ["output_log"] if log_filepath else basic_handlers,
+                "handlers": basic_handlers + (["output_log"] if log_filepath else []),
                 "propagate": True,
             },
             "tests": {
                 "level": "DEBUG",
-                "handlers": basic_handlers + ["output_log"] if log_filepath else basic_handlers,
+                "handlers": basic_handlers + (["output_log"] if log_filepath else []),
                 "propagate": True,
             },
         },

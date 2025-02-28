@@ -1,10 +1,10 @@
 import pandas as pd
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import os
 import logging
 import ast
 
-from humun_benchmark.config.common import MONTHLY_SERIES_IDS
+from humun_benchmark.config import MD_VINTAGE_IDS_MONTHLY
 
 
 log = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 
 def truncate_dataset(
     timeseries_df: pd.DataFrame, train_ratio: int = 3, n_steps: int = 12
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Truncate a timeseries DataFrame to the last (train_ratio+1)*n_steps rows.
 
@@ -24,7 +24,7 @@ def truncate_dataset(
         n_steps (int): Number of forecast steps (default: 12).
 
     Returns:
-        pd.DataFrame: The truncated DataFrame.
+        Tuple[pd.DataFrame, pd.DataFrame]: (history, forecast)
     """
     total_required = (train_ratio + 1) * n_steps
     if len(timeseries_df) < total_required:
@@ -34,7 +34,11 @@ def truncate_dataset(
         )
 
     truncated_df = timeseries_df.iloc[-total_required:]
-    return truncated_df
+
+    history = truncated_df.iloc[:-n_steps]
+    forecast = truncated_df.iloc[-n_steps:]
+
+    return history, forecast
 
 
 def load_from_parquet(
@@ -60,8 +64,6 @@ def load_from_parquet(
               "id2": ... }
     """
 
-    # TODO: check for empty data (i.e. if series_id doesn't exist but returns from pd.read_parquet)
-
     if n_datasets is not None:
         if n_datasets > len(series_ids):
             raise ValueError("n_datasets is greater than the number of series_ids.")
@@ -73,17 +75,22 @@ def load_from_parquet(
 
     for sid in series_ids:
         try:
-            series_dict = datasets[datasets["series_id"] == "AAA"].iloc[0].to_dict()
+            if datasets[datasets["series_id"] == sid].empty:
+                log.warning(f"Series ID {sid} has no data.")
+                continue
+
+            series_dict = datasets[datasets["series_id"] == sid].iloc[0].to_dict()
 
             # convert string to dictionary (not a JSON string)
             series_data = ast.literal_eval(series_dict["data"])
 
-            # Check for missing values.
+            # check for missing values.
             if any(v == "." for v in series_data.values()):
                 log.warning(f"Series {sid} contains missing values ('.'). Skipping.")
                 continue
 
             timeseries_df = pd.DataFrame(series_data.items(), columns=["date", "value"])
+
             timeseries_df["date"] = pd.to_datetime(timeseries_df["date"])
             timeseries_df["value"] = timeseries_df["value"].astype(float)
 
@@ -94,11 +101,22 @@ def load_from_parquet(
 
             result[sid] = {"history": history, "forecast": forecast, "title": title, "notes": notes}
 
+            # info string for logging
+            result[sid]["dataset_info"] = dataset_info(sid, title, timeseries_df, history, forecast)
+
         except (KeyError, IndexError) as e:
             log.warning(f"Error processing series {sid}: {str(e)}")
             continue
 
     return result
+
+
+def dataset_info(series_id, title, original, history, forecast) -> str:
+    o_len = len(original["value"])
+    n_len = len(history["value"]) + len(forecast["value"])
+    freq = pd.infer_freq(original["date"].sort_values()) or "Unknown"
+
+    return f"ID: {series_id}\n Title: {title}\n Frequency: {freq}\n Values: {o_len} -> {n_len}"
 
 
 if __name__ == "__main__":
@@ -110,7 +128,7 @@ if __name__ == "__main__":
     )
 
     result = load_from_parquet(
-        series_ids=MONTHLY_SERIES_IDS,
+        series_ids=MD_VINTAGE_IDS_MONTHLY,
         datasets_path="/workspace/datasets/fred/fred.parquet",
         require_metadata="/workspace/datasets/fred/all_fred_metadata.csv",
     )

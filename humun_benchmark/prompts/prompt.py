@@ -9,10 +9,9 @@ from humun_benchmark.data.formatting import format_timeseries_input
 # Parent class for all prompt methods
 class Prompt(BaseModel):
     task: str
-    timeseries: pd.DataFrame
-    n_timesteps: int = 12
+    history: pd.DataFrame
+    forecast: pd.DataFrame
     context: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
     prompt_text: Optional[str] = None
     responses: List[str] = []
 
@@ -26,10 +25,11 @@ class Prompt(BaseModel):
         info = (
             {
                 "task": self.task,
-                "n_timesteps": self.n_timesteps,
+                "history": self.history,
+                "forecast": self.forecast,
                 "context": self.context,
-                "metadata": self.metadata,
-                "forecasts": len(self.responses),
+                "prompt_text": self.prompt_text,
+                "responses": len(self.responses),
             },
         )
 
@@ -37,23 +37,21 @@ class Prompt(BaseModel):
 
 
 class InstructPrompt(Prompt):
-    results_df: Optional[pd.DataFrame] = None
+    results: Optional[pd.DataFrame] = None
 
     def __init__(
         self,
         task: str,
-        timeseries: pd.DataFrame,
-        n_timesteps: int = 12,
+        history: pd.DataFrame,
+        forecast: pd.DataFrame,
         context: str = None,
-        metadata: Optional[Dict[str, Any]] = None,
     ):
         # calls pydantic constructor to initialise fields
         super().__init__(
             task=task,
-            timeseries=timeseries,
-            n_timesteps=n_timesteps,
+            history=history,
+            forecast=forecast,
             context=context,
-            metadata=metadata,
         )
         self.prompt_text = self._format_input()
 
@@ -65,15 +63,13 @@ class InstructPrompt(Prompt):
 
         if self.context:
             prompt_text += f"<context>\n{self.context}\n</context>\n"
-        if self.metadata:
-            prompt_text += f"<metadata>\n{self.metadata}\n</metadata>\n"
 
-        prompt_text += format_timeseries_input(self.timeseries, self.n_timesteps)
+        prompt_text += format_timeseries_input(self.history, self.forecast)
         return prompt_text
 
     def merge_forecasts(self, dfs: List[pd.DataFrame]):
         """
-        Merge forecast responses together and include original values for metric calculation.
+        Merge forecast responses together and include the original forecast values for metric calculation.
         """
 
         # Rename the value columns to forecast_1, forecast_2, ..., forecast_n
@@ -86,14 +82,14 @@ class InstructPrompt(Prompt):
             for df in dfs[1:]:
                 merged_df = pd.merge(merged_df, df, on="date", how="outer")
 
-        # Convert dates to same type
+        # Ensure date columns are datetime type
         merged_df["date"] = pd.to_datetime(merged_df["date"])
-        self.timeseries["date"] = pd.to_datetime(self.timeseries["date"])
+        self.forecast["date"] = pd.to_datetime(self.forecast["date"])
 
-        # Merge with original timeseries to get actual values
+        # Merge with original forecast values to obtain actual value column for metrics
         self.results_df = pd.merge(
             merged_df,
-            self.timeseries[["date", "value"]],
+            self.forecast[["date", "value"]],
             on="date",
             how="inner",
         )

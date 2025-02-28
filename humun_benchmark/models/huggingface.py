@@ -6,6 +6,7 @@ LMs configured with Flash-Attention-2 for efficiency:
     - https://huggingface.co/docs/transformers/perf_infer_gpu_one#flashattention-2
 """
 
+from pprint import pformat
 import logging
 import re
 
@@ -185,4 +186,4 @@ class HuggingFace(Model):
             },
         }
 
-        return model_info
+        return pformat(model_info)
