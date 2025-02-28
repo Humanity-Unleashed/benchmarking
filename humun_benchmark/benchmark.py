@@ -88,7 +88,7 @@ def benchmark(
 
             log.info(
                 f"Model: {model}\n"
-                f"{data['dataset_info']}\n\n"
+                f" {data['dataset_info']}\n\n"
                 f" Prompt Tokens Length: {len(llm.tokenizer.encode(prompt.prompt_text))}\n"
                 f" Batch size: {batch_size}\n"
                 f" On device: {llm.model.device}"
@@ -114,7 +114,7 @@ def benchmark(
                 }
             ]
         )
-        output_file = os.path.join(output_path, f"{model}_{timestamp}.parquet")
+        output_file = os.path.join(output_path, f"{model.split('/')[-1]}_{timestamp}.parquet")
         output_df.to_parquet(output_file, index=False)
         log.info(f"Model output written to {output_file}")
 
