@@ -16,6 +16,7 @@ Instruct prompt method inspired by CiK forecasting [ [paper](https://arxiv.org/a
 * Parallelise model looping: Accelerate can be implemented to speed up inference/training, however we are still running through the models and datasets sequentially. Multi-threading the distribution of models to different GPUs could help speed things up, while still running the datasets in a sequential manner (for each model on it's own GPU- sequentially run through the datasets). Due to each timeseries having different timestamps, they each need their own pipeline due to a different prefix function.
 * Use hugging-face chat template: as a lot of models using the transformers package are trained using the hugging face chat-template, it may be more advantageous to adopt this approach. Test to see if there are substantial changes in performance when inferencing. 
 * refactor metrics to analyse benchmark results in new format. 
+* configure logs for Multi-threading / accelerate (queue-based config)
 
 ## Installation
 > [!Note]
