@@ -9,7 +9,7 @@ LMs configured with Flash-Attention-2 for efficiency:
 import logging
 import re
 from pprint import pformat
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from lmformatenforcer import RegexParser
@@ -22,6 +22,7 @@ from transformers import (
     LlamaForCausalLM,
     pipeline,
 )
+from accelerate import Accelerator
 
 from humun_benchmark.data.formatting import parse_forecast_output
 from humun_benchmark.models import Model, ModelLoadError
@@ -51,7 +52,7 @@ def get_model_and_tokenizer(llm, cuda):
 
     # case-specific model/tokenizer loaders
     try:
-        if "llama-3" in llm:
+        if "llama-3.1" in llm:
             tokenizer = AutoTokenizer.from_pretrained(llm, padding_side="left", legacy=False)
             model = LlamaForCausalLM.from_pretrained(
                 llm,
@@ -91,20 +92,28 @@ class HuggingFace(Model):
     Configures and handles Hugging Face LLM inference.
     """
 
-    def __init__(self, label: str, cuda: Optional[int] = None):
-        # device_map
-        self.cuda = {"": f"cuda:{cuda}"} if isinstance(cuda, int) else "auto"
+    def __init__(self, label: str, cuda: Optional[Union[int, str]] = None):
+        # cuda: int -> specific GPU; "accelerate" -> use Accelerator; None -> default auto device map.
+        if isinstance(cuda, int):
+            self.device_map = {"": f"cuda:{self.cuda}"}
+        else:
+            self.device_map = "auto"
+        self.accelerator = Accelerator() if cuda == "accelerate" else None
+
         super().__init__(label)
+        self._load_model()
 
     def _load_model(self):
-        self.model, self.tokenizer = get_model_and_tokenizer(self.label, self.cuda)
+        self.model, self.tokenizer = get_model_and_tokenizer(self.label, self.device_map)
 
-        # Create the pipeline once during model loading
+        if self.accelerator:
+            self.model = self.accelerator.prepare(self.model)
+
         self.pipeline = pipeline(
             task="text-generation",
             model=self.model,
             tokenizer=self.tokenizer,
-            device_map=self.cuda,
+            device_map=self.device_map,
         )
 
     @torch.inference_mode()

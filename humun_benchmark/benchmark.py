@@ -1,7 +1,7 @@
 import logging
 import os
 from datetime import datetime
-from typing import List
+from typing import List, Union, Optional
 import json
 import pandas as pd
 
@@ -29,6 +29,7 @@ def benchmark(
     batch_size: int = 10,
     train_ratio: int = 3,
     forecast_steps: int = 12,
+    cuda: Optional[Union[int, str]] = "accelerate",
 ) -> None:
     """
     Run benchmarks on time series data, selecting data either by filters or series IDs.
@@ -42,6 +43,7 @@ def benchmark(
         batch_size: Number of runs per inference
         train_ratio: Multiplier for training period
         forecast_steps: Number of forecast steps
+        cuda: Either an int (for a specific GPU), "accelerate" (to run in accelerate mode), or None.
     """
 
     # write logs to output path
@@ -58,6 +60,7 @@ def benchmark(
         "batch_size": batch_size,
         "train_ratio": train_ratio,
         "forecast_steps": forecast_steps,
+        "cuda": cuda,
     }
     params_str = "\n".join(f"\t{k}: {v}" for k, v in params.items())
     log.info(f"Benchmark Parameters: {{\n{params_str}\n}}")
@@ -76,7 +79,7 @@ def benchmark(
         log.info(f"Loading model: {model}")
 
         # create model instance and log config
-        llm = HuggingFace(model)
+        llm = HuggingFace(model, cuda=cuda)
         model_info = llm.serialise()
         log.info(f"Model Info:\n{model_info}")
 
@@ -127,8 +130,8 @@ if __name__ == "__main__":
         "Qwen/Qwen2.5-1.5B-Instruct",
         "Qwen/Qwen2.5-3B-Instruct",
         "Qwen/Qwen2.5-7B-Instruct",
-        # "meta-llama/Llama-3.2-1B-Instruct",
-        # "meta-llama/Llama-3.2-3B-Instruct",
+        "meta-llama/Llama-3.2-1B-Instruct",
+        "meta-llama/Llama-3.2-3B-Instruct",
         "meta-llama/Llama-3.1-8B-Instruct",
         "Ministral-8B-Instruct-2410",
     ]
