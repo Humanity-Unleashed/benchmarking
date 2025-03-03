@@ -1,7 +1,85 @@
+import ast
+import os
+from io import StringIO
+from typing import Dict, List, Union
+
 import numpy as np
 import pandas as pd
 from scipy.stats import rankdata
-from typing import Dict, List, Union
+
+
+def read_results(paths: Union[str, List[str]]) -> Dict[str, Dict]:
+    if isinstance(paths, str):
+        paths = [paths]
+
+    benchmarks = {os.path.basename(file): pd.read_parquet(file).iloc[0] for file in paths}
+
+    for model in benchmarks.keys():
+        benchmarks[model] = benchmarks[model].to_dict()
+
+        benchmarks[model]["results"] = ast.literal_eval(benchmarks[model]["results"])
+
+        for series_id, json_str in benchmarks[model]["results"].items():
+            df = pd.read_json(StringIO(json_str))
+            if "date" in df.columns:
+                df["date"] = pd.to_datetime(df["date"])
+            benchmarks[model]["results"][series_id] = df
+
+    return benchmarks
+
+
+def compute_all_metrics(
+    results_dict: Dict[str, Dict],
+) -> Dict[str, Union[pd.DataFrame, Dict[str, pd.DataFrame]]]:
+    """
+    Given a dictionary with model keys (from read_results), where for each model,
+    value['results'] is a dictionary of DataFrames keyed by series_id, compute:
+
+    - Per-dataset metrics: a DataFrame with one row per series_id.
+    - Overall (cross-dataset) metrics: a one-row DataFrame with aggregated metrics.
+
+    Also, adds a root-level key "benchmark" which is a DataFrame combining each model's
+    overall metrics (one row per model).
+
+    Returns a dictionary of the form:
+    {
+      'model1': {
+          'metrics': pd.DataFrame,       # Overall metrics (one row)
+          'per_dataset': pd.DataFrame    # Per-dataset metrics (one row per series_id)
+      },
+      'model2': { ... },
+      ...,
+      'benchmark': pd.DataFrame         # Combined overall metrics for each model
+    }
+    """
+    all_model_metrics = {}
+    overall_list = []
+
+    for model, data in results_dict.items():
+        results = data["results"]
+
+        per_dataset_metrics = {}
+        for series_id, df in results.items():
+            per_dataset_metrics[series_id] = compute_dataset_metrics(df)
+        per_dataset_df = pd.DataFrame.from_dict(per_dataset_metrics, orient="index")
+
+        # Compute overall (cross-dataset) metrics using all the DataFrames
+        list_of_dfs = list(results.values())
+        overall_metrics = compute_forecast_metrics(list_of_dfs)
+        overall_metrics_df = pd.DataFrame([overall_metrics])
+
+        overall_metrics_df.insert(0, "model", model.split("_")[0])  # removes date
+        overall_list.append(overall_metrics_df)
+
+        all_model_metrics[model] = {
+            "metrics": overall_metrics_df,
+            "per_dataset": per_dataset_df,
+        }
+
+    benchmark_df = pd.concat(overall_list, ignore_index=True)
+    all_model_metrics["benchmark"] = benchmark_df
+
+    return all_model_metrics
 
 
 def crps_closed_form(obs, forecasts):
