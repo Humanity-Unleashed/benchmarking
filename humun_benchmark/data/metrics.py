@@ -87,14 +87,53 @@ def crps_closed_form(obs, forecasts):
     Computes CRPS using the closed-form expression for an empirical forecast distribution.
     """
     forecasts = np.array(forecasts)
-
-    # mean of the absolute differences
+    # Mean absolute difference between forecasts and observation.
     term1 = np.mean(np.abs(forecasts - obs))
-
-    # average absolute difference between forecasts which is equivalent to
-    # the double sum divided by n^2, multiplied by 0.5
+    # 0.5 * mean pairwise absolute difference between forecasts.
     term2 = 0.5 * np.mean(np.abs(forecasts[:, None] - forecasts))
     return term1 - term2
+
+
+def crps(
+    target: np.array,
+    samples: np.array,
+) -> np.array:
+    """
+    Compute the CRPS using the probability weighted moment form.
+    See Eq ePWM from "Estimation of the Continuous Ranked Probability Score with
+    Limited Information and Applications to Ensemble Weather Forecasts"
+    https://link.springer.com/article/10.1007/s11004-017-9709-7
+
+    Parameters:
+    -----------
+    target: np.ndarray
+        The target value(s) (for scalar target, shape should be ()).
+    samples: np.ndarray
+        The forecast values. For a single time point, this should have shape (n_samples,).
+
+    Returns:
+    --------
+    crps: np.ndarray
+        The CRPS for the given target and forecast samples.
+    """
+    # Ensure target shape matches the "variable" dimensions of samples.
+    # For a scalar target and 1D samples, target.shape is () which equals samples.shape[1:]
+    assert target.shape == samples.shape[1:], (
+        f"shapes mismatch between: {target.shape} and {samples.shape}"
+    )
+
+    num_samples = samples.shape[0]
+    num_dims = samples.ndim
+    # Sort the forecast samples.
+    sorted_samples = np.sort(samples, axis=0)
+    # Compute the first term: average absolute difference between sorted samples and target.
+    abs_diff = np.abs(np.expand_dims(target, axis=0) - sorted_samples).sum(axis=0) / num_samples
+    # Compute beta0: the average of the sorted samples.
+    beta0 = sorted_samples.sum(axis=0) / num_samples
+    # Create an array [0, 1, ..., num_samples-1] and expand dims to match forecast dimensions.
+    i_array = np.expand_dims(np.arange(num_samples), axis=tuple(range(1, num_dims)))
+    beta1 = (i_array * sorted_samples).sum(axis=0) / (num_samples * (num_samples - 1))
+    return abs_diff + beta0 - 2 * beta1
 
 
 def compute_dataset_metrics(df: pd.DataFrame) -> Dict:
@@ -102,27 +141,25 @@ def compute_dataset_metrics(df: pd.DataFrame) -> Dict:
     Computes per-dataset error metrics that can be meaningfully averaged.
     """
     forecast_cols = [col for col in df.columns if col.startswith("forecast_")]
-    forecast_matrix = df[forecast_cols].values
-    actuals = df["value"].values
+    forecast_matrix = df[forecast_cols].values  # shape: (n_time_points, n_samples)
+    actuals = df["value"].values  # shape: (n_time_points,)
     forecast_errors = forecast_matrix - actuals[:, None]
 
-    # Only compute metrics that can be meaningfully averaged
+    # Compute metrics: MAE, RMSE, and MAPE (handling zero actuals).
     mae = np.mean(np.abs(forecast_errors))
     rmse = np.sqrt(np.mean(forecast_errors**2))
 
-    # Handle zero values in MAPE calculation
     non_zero_mask = actuals != 0
     if np.any(non_zero_mask):
         mape = np.mean(np.abs(forecast_errors[non_zero_mask] / actuals[non_zero_mask, None])) * 100
     else:
-        mape = np.nan  # or some other fallback
+        mape = np.nan
 
     return {
         "MAE": float(mae),
         "RMSE": float(rmse),
         "MAPE": float(mape),
         "n_samples": len(actuals),
-        # convert to list for JSON serialisation
         "forecasts": forecast_matrix.tolist(),
         "actuals": actuals.tolist(),
     }
@@ -131,30 +168,33 @@ def compute_dataset_metrics(df: pd.DataFrame) -> Dict:
 def compute_cross_dataset_metrics(forecasts: List[np.ndarray], actuals: List[np.ndarray]) -> Dict:
     """
     Computes metrics that need all datasets together.
+
+    Parameters:
+        forecasts: List of forecast arrays (each of shape: (n_time_points, n_samples))
+        actuals: List of actual arrays (each of shape: (n_time_points,))
     """
-    # Combine all forecasts and actuals
-    all_forecasts = np.vstack(forecasts)
-    all_actuals = np.concatenate(actuals)
+    # Combine all forecasts and actuals across datasets.
+    all_forecasts = np.vstack(forecasts)  # shape: (total_time_points, n_samples)
+    all_actuals = np.concatenate(actuals)  # shape: (total_time_points,)
     all_errors = all_forecasts - all_actuals[:, None]
 
-    # Rank metrics across all datasets
+    # Compute rank-based metrics (ranking errors for each time point).
     ranks = np.apply_along_axis(rankdata, 1, np.abs(all_errors))
     avg_rank = np.mean(ranks)
 
-    # CRPS across all datasets
-    crps_values = [crps_closed_form(obs, fc) for obs, fc in zip(all_actuals, all_forecasts)]
+    # Compute CRPS for each time point using the new CRPS function.
+    # Here, each row in all_forecasts corresponds to the n_samples for one time point.
+    crps_values = [crps(np.array(obs), fc) for obs, fc in zip(all_actuals, all_forecasts)]
     avg_crps = np.mean(crps_values)
 
-    # Distribution metrics
-    error_percentiles = np.percentile(np.abs(all_errors), [25, 50, 75, 90])
+    # Compute error distribution percentiles.
+    error_percentiles = np.percentile(np.abs(all_errors), [5, 50, 95])
 
     return {
         "CRPS": float(avg_crps),
         "Average Rank": float(avg_rank),
-        "Error P25": float(error_percentiles[0]),
         "Error P50": float(error_percentiles[1]),
-        "Error P75": float(error_percentiles[2]),
-        "Error P90": float(error_percentiles[3]),
+        "Error P95": float(error_percentiles[2]),
     }
 
 
