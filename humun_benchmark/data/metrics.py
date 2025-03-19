@@ -31,12 +31,6 @@ def read_results(paths: Union[str, List[str]]) -> Dict[str, Dict]:
     return benchmarks
 
 
-### METRICS REFACTOR ###
-# * modularise each metric into its own closed function
-# * clearly show how things are aggregated / calculated
-# * compute_all_metrics should simply be a for loop over each model and return a concatenated dataframe
-
-
 def crps_closed_form(actual, forecasts):
     """
     Computes CRPS using the closed-form expression for a single time-step's
