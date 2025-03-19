@@ -5,14 +5,16 @@ from typing import Dict, List, Union
 
 import numpy as np
 import pandas as pd
-from scipy.stats import rankdata
 
 
 def read_results(paths: Union[str, List[str]]) -> Dict[str, Dict]:
     if isinstance(paths, str):
         paths = [paths]
 
-    benchmarks = {os.path.basename(file): pd.read_parquet(file).iloc[0] for file in paths}
+    # strip '_<datetime>.parquet' from path
+    benchmarks = {
+        os.path.splitext(file)[0][:-16].split("/")[-1]: pd.read_parquet(file).iloc[0] for file in paths
+    }
 
     for model in benchmarks.keys():
         benchmarks[model] = benchmarks[model].to_dict()
@@ -29,200 +31,223 @@ def read_results(paths: Union[str, List[str]]) -> Dict[str, Dict]:
     return benchmarks
 
 
-def compute_all_metrics(
-    results_dict: Dict[str, Dict],
-) -> Dict[str, Union[pd.DataFrame, Dict[str, pd.DataFrame]]]:
+### METRICS REFACTOR ###
+# * modularise each metric into its own closed function
+# * clearly show how things are aggregated / calculated
+# * compute_all_metrics should simply be a for loop over each model and return a concatenated dataframe
+
+
+def crps_closed_form(actual, forecasts):
     """
-    Given a dictionary with model keys (from read_results), where for each model,
-    value['results'] is a dictionary of DataFrames keyed by series_id, compute:
-
-    - Per-dataset metrics: a DataFrame with one row per series_id.
-    - Overall (cross-dataset) metrics: a one-row DataFrame with aggregated metrics.
-
-    Also, adds a root-level key "benchmark" which is a DataFrame combining each model's
-    overall metrics (one row per model).
-
-    Returns a dictionary of the form:
-    {
-      'model1': {
-          'metrics': pd.DataFrame,       # Overall metrics (one row)
-          'per_dataset': pd.DataFrame    # Per-dataset metrics (one row per series_id)
-      },
-      'model2': { ... },
-      ...,
-      'benchmark': pd.DataFrame         # Combined overall metrics for each model
-    }
-    """
-    all_model_metrics = {}
-    overall_list = []
-
-    for model, data in results_dict.items():
-        results = data["results"]
-
-        per_dataset_metrics = {}
-        for series_id, df in results.items():
-            per_dataset_metrics[series_id] = compute_dataset_metrics(df)
-        per_dataset_df = pd.DataFrame.from_dict(per_dataset_metrics, orient="index")
-
-        # Compute overall (cross-dataset) metrics using all the DataFrames
-        list_of_dfs = list(results.values())
-        overall_metrics = compute_forecast_metrics(list_of_dfs)
-        overall_metrics_df = pd.DataFrame([overall_metrics])
-
-        overall_metrics_df.insert(0, "model", model.split("_")[0])  # removes date
-        overall_list.append(overall_metrics_df)
-
-        all_model_metrics[model] = {
-            "metrics": overall_metrics_df,
-            "per_dataset": per_dataset_df,
-        }
-
-    benchmark_df = pd.concat(overall_list, ignore_index=True)
-    all_model_metrics["benchmark"] = benchmark_df
-
-    return all_model_metrics
-
-
-def crps_closed_form(obs, forecasts):
-    """
-    Computes CRPS using the closed-form expression for an empirical forecast distribution.
+    Computes CRPS using the closed-form expression for a single time-step's
+    forecast distribution.
     """
     forecasts = np.array(forecasts)
     # Mean absolute difference between forecasts and observation.
-    term1 = np.mean(np.abs(forecasts - obs))
+    term1 = np.mean(np.abs(forecasts - actual))
     # 0.5 * mean pairwise absolute difference between forecasts.
     term2 = 0.5 * np.mean(np.abs(forecasts[:, None] - forecasts))
     return term1 - term2
 
 
-def crps(
-    target: np.array,
-    samples: np.array,
-) -> np.array:
+def normalized_crps(actual, forecasts, overall_range):
     """
-    Compute the CRPS using the probability weighted moment form.
-    See Eq ePWM from "Estimation of the Continuous Ranked Probability Score with
-    Limited Information and Applications to Ensemble Weather Forecasts"
-    https://link.springer.com/article/10.1007/s11004-017-9709-7
+    Computes a normalized CRPS by scaling the raw CRPS using a task-dependent factor α,
+    where α is 1 divided by the overall range of the actual values.
+    This normalization makes the CRPS scale-independent.
 
     Parameters:
-    -----------
-    target: np.ndarray
-        The target value(s) (for scalar target, shape should be ()).
-    samples: np.ndarray
-        The forecast values. For a single time point, this should have shape (n_samples,).
+      actual: scalar actual value for a time step.
+      forecasts: array-like forecast samples for that time step.
+      overall_range: the range (max - min) of the entire actuals dataset.
 
     Returns:
-    --------
-    crps: np.ndarray
-        The CRPS for the given target and forecast samples.
+      Normalized CRPS.
     """
-    # Ensure target shape matches the "variable" dimensions of samples.
-    # For a scalar target and 1D samples, target.shape is () which equals samples.shape[1:]
-    assert target.shape == samples.shape[1:], (
-        f"shapes mismatch between: {target.shape} and {samples.shape}"
-    )
-
-    num_samples = samples.shape[0]
-    num_dims = samples.ndim
-    # Sort the forecast samples.
-    sorted_samples = np.sort(samples, axis=0)
-    # Compute the first term: average absolute difference between sorted samples and target.
-    abs_diff = np.abs(np.expand_dims(target, axis=0) - sorted_samples).sum(axis=0) / num_samples
-    # Compute beta0: the average of the sorted samples.
-    beta0 = sorted_samples.sum(axis=0) / num_samples
-    # Create an array [0, 1, ..., num_samples-1] and expand dims to match forecast dimensions.
-    i_array = np.expand_dims(np.arange(num_samples), axis=tuple(range(1, num_dims)))
-    beta1 = (i_array * sorted_samples).sum(axis=0) / (num_samples * (num_samples - 1))
-    return abs_diff + beta0 - 2 * beta1
+    raw_crps = crps_closed_form(actual, forecasts)
+    if overall_range == 0:
+        return raw_crps
+    alpha = 1 / overall_range
+    return raw_crps * alpha
 
 
-def compute_dataset_metrics(df: pd.DataFrame) -> Dict:
+def compute_dataset_metrics(df: pd.DataFrame, title: str = None) -> Dict:
     """
-    Computes per-dataset error metrics that can be meaningfully averaged.
+    Computes error metrics for a single dataset.
+
+    Parameters:
+        df (pd.DataFrame): A DataFrame containing a 'value' column for actuals and
+                           one or more forecast columns starting with "forecast_".
+        title (str): dataset label
+
+    Returns:
+        pd.DataFrame: A DataFrame with one row per time step and columns for each metric.
     """
     forecast_cols = [col for col in df.columns if col.startswith("forecast_")]
     forecast_matrix = df[forecast_cols].values  # shape: (n_time_points, n_samples)
     actuals = df["value"].values  # shape: (n_time_points,)
     forecast_errors = forecast_matrix - actuals[:, None]
 
-    # Compute metrics: MAE, RMSE, and MAPE (handling zero actuals).
+    ### Overall (dataset-level) metrics ###
     mae = np.mean(np.abs(forecast_errors))
     rmse = np.sqrt(np.mean(forecast_errors**2))
 
-    non_zero_mask = actuals != 0
-    if np.any(non_zero_mask):
-        mape = np.mean(np.abs(forecast_errors[non_zero_mask] / actuals[non_zero_mask, None])) * 100
-    else:
-        mape = np.nan
+    # use forecast mean for wape
+    forecast_mean = np.mean(forecast_matrix, axis=1)
+    wmape = (
+        np.sum(np.abs(actuals - forecast_mean)) / np.sum(np.abs(actuals)) * 100
+        if np.sum(np.abs(actuals)) != 0
+        else np.nan
+    )
+
+    # Compute overall range from the entire dataset's actuals and normalise crps
+    overall_range = np.max(actuals) - np.min(actuals)
+    norm_crps_list = [
+        normalized_crps(actuals[i], forecast_matrix[i, :], overall_range) for i in range(len(actuals))
+    ]
+    avg_norm_crps = np.mean(norm_crps_list)
+
+    dataset_metrics = pd.DataFrame(
+        {
+            "Dataset": [title],
+            "WMAPE": [float(round(wmape, 2))],
+            "CRPS": [float(round(avg_norm_crps, 2))],
+            "MAE": [float(round(mae, 2))],
+            "RMSE": [float(round(rmse, 2))],
+            "n_samples": [len(actuals)],
+        }
+    )
+
+    ### Per-timestep metrics ###
+    mae_list = np.mean(np.abs(forecast_matrix - actuals[:, None]), axis=1)
+    rmse_list = np.sqrt(np.mean((forecast_matrix - actuals[:, None]) ** 2, axis=1))
+    wmape_list = [
+        np.mean(np.abs(forecast_matrix[i] - actuals[i])) / abs(actuals[i]) * 100
+        if actuals[i] != 0
+        else np.nan
+        for i in range(len(actuals))
+    ]
+
+    # Construct a per-timestep metrics DataFrame indexed by (Title, Metric)
+    metrics_order = ["MAE", "RMSE", "WMAPE"]
+    metric_values = {"MAE": mae_list, "RMSE": rmse_list, "WMAPE": wmape_list}
+
+    n_timesteps = len(actuals)
+    rows = []
+    for metric in metrics_order:
+        row = {"Dataset": title, "Metric": metric}
+        for i in range(n_timesteps):
+            row[f"t_{i + 1}"] = round(metric_values[metric][i], 2)
+        rows.append(row)
+
+    timestep_metrics = pd.DataFrame(rows)
+    timestep_metrics = timestep_metrics.set_index(["Dataset", "Metric"])
+
+    return dataset_metrics, timestep_metrics
+
+
+def compute_model_metrics(model_results: Dict[str, pd.DataFrame], model_name: str = None):
+    """
+    Computes metrics across mutliple datasets for a model.
+
+    Params:
+        - model_results (Dict[str, pd.DataFrame]): a dictionary containing a pd.DataFrame
+            of forecasts for each dataset.
+        - model_name (str, Optional): label for the model to be put into dataframe entries.
+
+    Returns:
+        - A dictionary containing:
+            * model_metrics (pd.DataFrame): model's overall metrics.
+            * dataset_metrics (pd.DataFrame): performance per dataset.
+            * timestep_metrics (pd.DataFrame): the model's performance per timestep,
+                aggregated across datasets.
+            * aggregated_timesteps (pd.DataFrame): model's overall performance over
+                timesteps.
+    """
+
+    dset_metrics_list = []
+    timestep_metrics_list = []
+
+    for dset_name, result_df in model_results.items():
+        ds_met, ts_met = compute_dataset_metrics(result_df, title=dset_name)
+        dset_metrics_list.append(ds_met)
+        timestep_metrics_list.append(ts_met)
+
+    dset_metrics = pd.concat(dset_metrics_list, ignore_index=True)
+
+    timestep_metrics = pd.concat(timestep_metrics_list)
+
+    # aggregate over datasets
+    agg_wmape = dset_metrics["WMAPE"].sum() / len(dset_metrics["WMAPE"])
+    agg_crps = dset_metrics["CRPS"].sum() / len(dset_metrics["CRPS"])
+    agg_mae = dset_metrics["MAE"].sum() / len(dset_metrics["MAE"])
+    agg_rmse = dset_metrics["RMSE"].sum() / len(dset_metrics["RMSE"])
+
+    model_metrics = pd.DataFrame(
+        {
+            "Model": [model_name],
+            "WMAPE": [round(agg_wmape, 4)],
+            "CRPS": [round(agg_crps, 2)],
+            "MAE": [round(agg_mae, 2)],
+            "RMSE": [round(agg_rmse, 2)],
+        }
+    )
+
+    # pivot dataset metrics to be concatenated with other model's
+    dset_metrics = dset_metrics.melt(
+        id_vars=["Dataset"],
+        value_vars=["WMAPE", "CRPS", "MAE", "RMSE"],
+        var_name="Metric",
+        value_name=model_name,
+    )
+    dset_metrics = dset_metrics.set_index(["Dataset", "Metric"])
+
+    # aggregate timestep metrics
+    agg_ts = timestep_metrics.groupby(level="Metric").mean()
+    agg_ts["Model"] = model_name
+    agg_ts = agg_ts.reset_index().set_index(["Model", "Metric"])
 
     return {
-        "MAE": float(mae),
-        "RMSE": float(rmse),
-        "MAPE": float(mape),
-        "n_samples": len(actuals),
-        "forecasts": forecast_matrix.tolist(),
-        "actuals": actuals.tolist(),
+        "model_metrics": model_metrics,
+        "dataset_metrics": dset_metrics,
+        "timestep_metrics": timestep_metrics,
+        "agg_timesteps": agg_ts,
     }
 
 
-def compute_cross_dataset_metrics(forecasts: List[np.ndarray], actuals: List[np.ndarray]) -> Dict:
+def compute_benchmark_metrics(results: Dict[str, Dict]):
     """
-    Computes metrics that need all datasets together.
+    Computes metrics for all models in a benchmarking results object, as read in
+    by `read_results()`.
 
-    Parameters:
-        forecasts: List of forecast arrays (each of shape: (n_time_points, n_samples))
-        actuals: List of actual arrays (each of shape: (n_time_points,))
+    Params:
+        - results (Dict[str, Dict]): a dictionary containing each model run's
+            forecasting results.
+
+    Returns:
+        - benchmark_metrics: a dictionary containing overall benchmark results,
+            as well as each model's individual results per dataset, and time-step
+            based metrics.
     """
-    # Combine all forecasts and actuals across datasets.
-    all_forecasts = np.vstack(forecasts)  # shape: (total_time_points, n_samples)
-    all_actuals = np.concatenate(actuals)  # shape: (total_time_points,)
-    all_errors = all_forecasts - all_actuals[:, None]
 
-    # Compute rank-based metrics (ranking errors for each time point).
-    ranks = np.apply_along_axis(rankdata, 1, np.abs(all_errors))
-    avg_rank = np.mean(ranks)
+    model_metrics = {}
 
-    # Compute CRPS for each time point using the new CRPS function.
-    # Here, each row in all_forecasts corresponds to the n_samples for one time point.
-    crps_values = [crps(np.array(obs), fc) for obs, fc in zip(all_actuals, all_forecasts)]
-    avg_crps = np.mean(crps_values)
+    for model_name, model_output in results.items():
+        model_metrics[model_name] = compute_model_metrics(model_output["results"], model_name)
 
-    # Compute error distribution percentiles.
-    error_percentiles = np.percentile(np.abs(all_errors), [5, 50, 95])
+    # join together each model's overall metrics
+    overall_metrics = pd.concat([x["model_metrics"] for x in model_metrics.values()], ignore_index=True)
+    overall_metrics = overall_metrics.set_index("Model").sort_index()
+
+    overall_datasets = (
+        pd.concat([x["dataset_metrics"] for x in model_metrics.values()], axis=1)
+        .sort_index()
+        .sort_index(axis=1)
+    )
+    overall_timesteps = pd.concat([x["agg_timesteps"] for x in model_metrics.values()]).sort_index()
 
     return {
-        "CRPS": float(avg_crps),
-        "Average Rank": float(avg_rank),
-        "Error P50": float(error_percentiles[1]),
-        "Error P95": float(error_percentiles[2]),
+        "overall_metrics": overall_metrics,
+        "overall_datasets": overall_datasets,
+        "overall_timesteps": overall_timesteps,
     }
-
-
-def compute_forecast_metrics(dfs: Union[pd.DataFrame, List[pd.DataFrame]]) -> Dict:
-    """
-    Computes all metrics, handling both per-dataset and cross-dataset metrics properly.
-    """
-    if isinstance(dfs, pd.DataFrame):
-        dfs = [dfs]
-
-    # Compute per-dataset metrics
-    dataset_metrics = [compute_dataset_metrics(df) for df in dfs]
-
-    # Weight averageable metrics by dataset size
-    total_samples = sum(m["n_samples"] for m in dataset_metrics)
-    weighted_metrics = {
-        "MAE": float(sum(m["MAE"] * m["n_samples"] for m in dataset_metrics) / total_samples),
-        "RMSE": float(
-            np.sqrt(sum((m["RMSE"] ** 2 * m["n_samples"]) for m in dataset_metrics) / total_samples)
-        ),
-        "MAPE": float(sum(m["MAPE"] * m["n_samples"] for m in dataset_metrics) / total_samples),
-    }
-
-    # Compute cross-dataset metrics (convert back to np for metrics)
-    forecasts = [np.array(m["forecasts"]) for m in dataset_metrics]
-    actuals = [np.array(m["actuals"]) for m in dataset_metrics]
-    cross_metrics = compute_cross_dataset_metrics(forecasts, actuals)
-
-    # Combine all metrics
-    return {**weighted_metrics, **cross_metrics}
