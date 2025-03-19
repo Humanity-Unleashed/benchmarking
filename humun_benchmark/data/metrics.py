@@ -17,7 +17,8 @@ def read_results(paths: Union[str, List[str]]) -> Dict[str, Dict]:
     for model in benchmarks.keys():
         benchmarks[model] = benchmarks[model].to_dict()
 
-        benchmarks[model]["results"] = ast.literal_eval(benchmarks[model]["results"])
+        for key in benchmarks[model].keys():
+            benchmarks[model][key] = ast.literal_eval(benchmarks[model][key])
 
         for series_id, json_str in benchmarks[model]["results"].items():
             df = pd.read_json(StringIO(json_str))
