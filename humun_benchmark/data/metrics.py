@@ -46,7 +46,7 @@ def crps_closed_form(actual, forecasts):
 
 def normalized_crps(actual, forecasts, overall_range):
     """
-    Computes a normalized CRPS by scaling the raw CRPS using a task-dependent factor α,
+    Computes a normalized CRPS by scaling the raw CRPS using a factor α,
     where α is 1 divided by the overall range of the actual values.
     This normalization makes the CRPS scale-independent.
 
