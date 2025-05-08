@@ -1,8 +1,10 @@
+import atexit
 import logging
 import logging.config
 import logging.handlers
-import atexit
 import time
+
+from transformers.utils import logging as hf_utils_logging
 
 
 class StdoutFilter(logging.Filter):
@@ -19,24 +21,27 @@ class StderrFilter(logging.Filter):
         return record.levelno > logging.INFO
 
 
-def setup_logging(log_filepath: str = None):
+def setup_logging(
+    log_filepath: str = None,
+    filter_shards: bool = True,
+    level: int = logging.INFO,
+):
     """
     Sets up simple plaintext logging for files and console output.
 
-    log_filepath (str): add the file-writing log handler to config if provided,
-        otherwise just prints to stdout/stdin.
+    Args:
+      log_filepath: if provided, logs are also written (in append mode) to this file
+      filter_shards: if True, only the 100% shard‐loading line is shown
+      level: minimum level for root + humun_benchmark + __main__ (e.g. INFO, DEBUG, WARNING)
     """
-
     # clear any existing handlers
     root = logging.getLogger()
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
-    # `basic_handlers`
-    basic_handlers = ["console_stdout", "console_stderr"]
-
     logging.Formatter.converter = time.gmtime
 
+    basic_handlers = ["console_stdout", "console_stderr"]
     handlers = {
         "console_stdout": {
             "class": "logging.StreamHandler",
@@ -65,7 +70,7 @@ def setup_logging(log_filepath: str = None):
         "disable_existing_loggers": False,
         "formatters": {
             "detailed": {
-                "format": "[%(asctime)s] [%(processName)s:%(process)d] %(levelname)s - %(name)s:\n%(message)s\n",
+                "format": "[%(asctime)s] %(levelname)s - %(name)s:\n %(message)s\n",
                 "datefmt": "%Y-%m-%d %H:%M:%S UTC",
             }
         },
@@ -76,23 +81,30 @@ def setup_logging(log_filepath: str = None):
         },
         "loggers": {
             "humun_benchmark": {
-                "level": "DEBUG",
+                "level": level,
                 "handlers": basic_handlers + (["output_log"] if log_filepath else []),
-                "propagate": True,
+                "propagate": False,
             },
             "tests": {
-                "level": "DEBUG",
+                "level": level,
                 "handlers": basic_handlers + (["output_log"] if log_filepath else []),
                 "propagate": True,
             },
+        },
+        "root": {
+            "level": level,
+            "handlers": basic_handlers + (["output_log"] if log_filepath else []),
         },
     }
 
     logging.config.dictConfig(log_config)
 
+    if filter_shards:
+        hf_utils_logging.disable_progress_bar()
+
     if log_filepath:
         log = logging.getLogger(__name__)
-        log.info(f"Writing logs to {log_filepath}")
+        log.debug(f"Writing logs to {log_filepath}")
 
     # ensure logging is shutdown automatically on exit
     atexit.register(logging.shutdown)

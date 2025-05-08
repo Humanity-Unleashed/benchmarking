@@ -18,7 +18,7 @@ from humun_benchmark.models import HuggingFace
 dotenv.load_dotenv()
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("humun_benchmark.benchmark")
 
 
 def single_model_run(
@@ -29,6 +29,7 @@ def single_model_run(
     output_path: str,
     batch_size: int,
     context: bool,
+    level: int = logging.INFO,
 ) -> None:
     """
     Benchmarks a single model on a specific GPU. Designed to be run in a separate process.
@@ -40,20 +41,22 @@ def single_model_run(
         output_path: Base directory to store results.
         batch_size: Number of runs per inference batch (within the model's inference method).
         context: Whether to supply context to the prompt.
-        run_timestamp: The shared timestamp for the overall benchmark run.
+        level: logging level to set all loggers at. Default to INFO
     """
 
     # configure logging specific to this worker process
-    setup_logging(os.path.join(output_path, "benchmark.log"))
+    setup_logging(os.path.join(output_path, "benchmark.log"), level=level)
     try:
         if category == "llm":
             torch.cuda.set_device(gpu_id)
             device_name = torch.cuda.get_device_name(gpu_id)
-            worker_log = logging.getLogger(f"{__name__}.worker.{model_name.split('/')[-1]}.GPU{gpu_id}")
-            worker_log.info(f"Process started for model '{model_name}' on GPU {gpu_id} {device_name}")
+            worker_log = logging.getLogger(
+                f"humun_benchmark.benchmark.{model_name.split('/')[-1]}.GPU{gpu_id}"
+            )
+            worker_log.debug(f"Process started for model '{model_name}' on GPU {gpu_id} {device_name}")
         else:
-            worker_log = logging.getLogger(f"{__name__}.worker.{model_name.split('/')[-1]}.CPU")
-            worker_log.info("Running on CPU")
+            worker_log = logging.getLogger(f"humun_benchmark.{model_name.split('/')[-1]}.CPU")
+            worker_log.debug("Running on CPU")
 
         # load model
         ModelClass = MODEL_REGISTRY.get(model_name, HuggingFace)
@@ -62,18 +65,14 @@ def single_model_run(
         model._load_model()
 
         model_info = model.serialise()
-        worker_log.info(f"Model loaded. Info:\n{model_info}")
+        worker_log.debug(f"Model loaded. Info:\n{model_info}")
 
         model_results = {"dataset_info": {}, "results": {}}
         # iterate through datasets for this model
         for series_id, data in fred_data.items():
-            worker_log.info(f"Processing dataset: {series_id}")
             model_results["dataset_info"][series_id] = data["dataset_info"]
-
-            worker_log.info(
-                f"Starting inference for {series_id}... Batch size: {batch_size} On device: {gpu_id}"
-            )
-            # Run Inference
+            worker_log.debug(f"Starting inference for {series_id}... Batch size: {batch_size}")
+            # run Inference
             try:
                 result: pd.DataFrame = model.predict(
                     data=data,
@@ -102,12 +101,13 @@ def single_model_run(
         # Use the shared run_timestamp for consistent naming
         output_file = os.path.join(output_path, f"{model_name.split('/')[-1]}.parquet")
         output_df.to_parquet(output_file, index=False)
-        worker_log.info(f"Model output written to {output_file}")
 
         # clean up memory
         del model
         torch.cuda.empty_cache()
-        worker_log.info(f"Finished processing model '{model_name}' on GPU {gpu_id}")
+        worker_log.info(
+            f"Finished processing model '{model_name}' on GPU {gpu_id}. Results written to {output_file}"
+        )
 
     except Exception as e:
         # Log any exceptions that occur during the entire process for this model
@@ -133,6 +133,7 @@ def benchmark(
     forecast_steps: int = 12,
     context: bool = False,
     available_gpu_ids: List[int] = [],
+    level: int = logging.INFO,
 ) -> None:
     """
     Run benchmarks concurrently on available GPUs, assigning one model per GPU.
@@ -167,16 +168,16 @@ def benchmark(
         log.error("No CUDA GPUs found.")
         raise RuntimeError("No CUDA GPUs detected.")
 
-    log.info(f"Detected {num_gpus} CUDA GPUs.")
+    log.debug(f"Detected {num_gpus} CUDA GPUs.")
 
     # determine actual series IDs to use
     if n_datasets is not None and n_datasets < len(series_ids):
         selected_series_ids = series_ids[:n_datasets]
-        log.info(f"Using the first {n_datasets} series IDs.")
+        log.debug(f"Using the first {n_datasets} series IDs.")
     else:
         selected_series_ids = series_ids
         n_datasets = len(selected_series_ids)  # update for logging
-        log.info(f"Using all {n_datasets} provided series IDs.")
+        log.debug(f"Using all {n_datasets} provided series IDs.")
 
     # log params
     params = {
@@ -191,7 +192,7 @@ def benchmark(
         "context": context,
     }
     params_str = "\n".join(f"\t{k}: {v}" for k, v in params.items())
-    log.info(f"Benchmark Parameters: {{\n{params_str}\n}}")
+    log.info(f"\nBenchmark Parameters: {{\n{params_str}\n}}")
 
     # load all necessary data before starting parallel processes
     log.info(f"Loading {len(selected_series_ids)} datasets...")
@@ -224,7 +225,7 @@ def benchmark(
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_gpus) as executor:
         for i, (category, model_name) in enumerate(tasks):
             gpu_id = available_gpu_ids[i % num_gpus]  # assign in round-robin fashion
-            log.info(f"Submitting {category} model '{model_name}' → GPU {gpu_id}")
+            log.debug(f"Submitting {category} model '{model_name}' → GPU {gpu_id}")
             future = executor.submit(
                 single_model_run,
                 model_name=model_name,
@@ -234,10 +235,11 @@ def benchmark(
                 output_path=output_path,
                 batch_size=batch_size,
                 context=context,
+                level=level,
             )
             futures.append(future)
 
-        log.info("All benchmark tasks submitted. Waiting for completion...")
+        log.debug("All benchmark tasks submitted. Waiting for completion...")
         completed_count = 0
         failed_count = 0
         # use as_completed to process results as they finish- good for large runs
@@ -254,26 +256,27 @@ def benchmark(
                 log.error(f"A model benchmark task failed. Error: {e}")
 
         log.info(
-            f"{'-' * 30}"
+            f"\n{'-' * 30}"
             f"\nBenchmark run completed."
             f"\nTotal models processed: {len(tasks)}"
             f"\nSuccessful: {completed_count}"
             f"\nFailed: {failed_count}"
             "\n"
+            f"\nOutputs written to {output_path}\n"
             f"{'-' * 30}"
         )
 
 
 if __name__ == "__main__":
     try:
-        # Set start method to 'spawn' - Necessary for CUDA on Linux AND macOS
+        # set start method to 'spawn' - Necessary for CUDA on Linux AND macOS
         multiprocessing.set_start_method("spawn", force=True)
-        log.info("Multiprocessing start method set to 'spawn'.")
+        log.debug("Multiprocessing start method set to 'spawn'.")
     except RuntimeError as e:
         log.warning(f"Warning: Could not set multiprocessing start method ('{e}'). Using default.")
         pass
 
-    # possible to make a flag?
+    # possible to make a flag? or as input JSON/YAML file
     # Define models and other parameters here
     models_to_test = {
         "llm": [
@@ -298,15 +301,19 @@ if __name__ == "__main__":
 
     # make an input flag --benchmark_name, default to RUN_TIMESTAMP
     timestamp_folder = datetime.now().strftime("%Y%m%d_%H%M%S")  # e.g. "20250508_123456"
+    timestamp_folder = "llm_zeroshot_with_ctx_" + timestamp_folder
     run_dir = os.path.join(base_results, timestamp_folder)
     os.makedirs(run_dir, exist_ok=True)
 
     # make an input flag --use_gpus
     available_gpu_ids = [5, 6, 7]
 
+    # make an input flag
+    logging_level = logging.INFO
+
     # point logging at run_dir/benchmark.log
-    setup_logging(os.path.join(run_dir, "benchmark.log"))
-    log = logging.getLogger(__name__)
+    setup_logging(os.path.join(run_dir, "benchmark.log"), level=logging_level)
+    log = logging.getLogger("humun_benchmark.benchmark")
     log.info(f"Writing all outputs into {run_dir}")
 
     if not datasets_path_env:
@@ -321,10 +328,11 @@ if __name__ == "__main__":
         datasets_path=datasets_path_env,
         output_path=run_dir,
         series_ids=MD_VINTAGE_IDS_MONTHLY,
-        n_datasets=5,
+        n_datasets=10,
         batch_size=15,
-        train_ratio=3,
-        forecast_steps=12,
+        train_ratio=7,
+        forecast_steps=6,
         context=True,
         available_gpu_ids=available_gpu_ids,
+        level=logging_level,
     )

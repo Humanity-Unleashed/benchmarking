@@ -62,7 +62,7 @@ def parse_forecast_output(response: str) -> pd.DataFrame:
     forecast_match = re.search(forecast_pattern, response, re.DOTALL)
 
     if not forecast_match:
-        log.info(f"Response: {response}")
+        log.warning(f"Response: {response}")
         raise ValueError("No forecast section found in response")
 
     forecast_text = forecast_match.group(1)

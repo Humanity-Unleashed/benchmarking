@@ -171,4 +171,3 @@ if __name__ == "__main__":
         pkl.dump(result, f)
 
     log.info(f"written to {outputfile}")
-

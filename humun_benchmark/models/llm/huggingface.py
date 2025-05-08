@@ -24,6 +24,7 @@ from transformers import (
     pipeline as hf_pipeline,
 )
 
+
 from humun_benchmark.config.common import NUMERICAL
 
 from ..base import InferenceError, Model, ModelLoadError
@@ -42,7 +43,7 @@ def get_model_and_tokenizer(llm_identifier, cuda_device_map):
     if "/" not in llm_identifier:
         if "llama" in llm_identifier.lower():
             llm_identifier = "meta-llama/" + llm_identifier
-        elif "mistral" in llm_identifier.lower():
+        elif "istral" in llm_identifier.lower():
             llm_identifier = "mistralai/" + llm_identifier
         elif "qwen" in llm_identifier.lower():
             llm_identifier = "Qwen/" + llm_identifier
@@ -81,7 +82,7 @@ def get_model_and_tokenizer(llm_identifier, cuda_device_map):
         if hasattr(model.config, "pad_token_id") and model.config.pad_token_id is None:
             model.config.pad_token_id = tokenizer.eos_token_id
 
-        log.info(f"Model '{llm_identifier}' and tokenizer loaded successfully.")
+        log.debug(f"Model '{llm_identifier}' and tokenizer loaded successfully.")
         return model.eval(), tokenizer
 
     except Exception as e:
@@ -116,8 +117,8 @@ class HuggingFace(Model):
                 "tokenizer": self.tokenizer,
             }
 
-            if isinstance(self.cuda_setting, int):
-                pipeline_args["device"] = self.cuda_setting  #  Pass the GPU ID directly
+            # if isinstance(self.cuda_setting, int):
+            #     pipeline_args["device"] = self.cuda_setting  #  Pass the GPU ID directly
 
             self.pipeline = hf_pipeline(**pipeline_args)
             log.info(f"HuggingFace model '{self.label}' loaded. Pipeline device: {self.pipeline.device}")
@@ -160,10 +161,11 @@ class HuggingFace(Model):
         parser = RegexParser(format_output_regex(future_timestamps))
         prefix_function = build_transformers_prefix_allowed_tokens_fn(self.pipeline.tokenizer, parser)
 
-        # Log prompt length before inference
         try:
-            prompt_tokens = len(self.tokenizer.encode(payload.prompt_text))
-            log.info(f"Prompt Tokens Length: {prompt_tokens}")
+            log.debug(
+                f"Prompt Tokens Length: {len(self.tokenizer.encode(payload.prompt_text))}\n"
+                f"Prompt Text:\n\n{payload.prompt_text}\n"
+            )
         except Exception as e:
             log.warning(f"Could not encode prompt text for token length calculation: {e}")
 
