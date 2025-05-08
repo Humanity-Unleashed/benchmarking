@@ -77,6 +77,16 @@ Generating inference -
 > python humun_benchmark/benchmark.py 
 ```
 
+Results store. Uses .env + datetime string by default.
+```bash
+results_store/YYYYMMDD_HHMMSS/
+  ├ benchmark.log
+  ├ Qwen…parquet
+  ├ meta-llama…parquet
+  └ …
+```
+
+
 Calculating metrics - 
 ```python
 from humun_benchmark.data.metrics import read_results, compute_all_metrics
@@ -86,6 +96,8 @@ results = read_results(paths)
 metrics = compute_all_metrics(results)
 metrics['benchmark'] # pd.DataFrame of cross-dataset results for all models selected
 ```
+
+
 
 
 

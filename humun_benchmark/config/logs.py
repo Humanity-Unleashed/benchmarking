@@ -65,7 +65,7 @@ def setup_logging(log_filepath: str = None):
         "disable_existing_loggers": False,
         "formatters": {
             "detailed": {
-                "format": "[%(asctime)s] %(levelname)s - %(name)s:\n %(message)s\n",
+                "format": "[%(asctime)s] [%(processName)s:%(process)d] %(levelname)s - %(name)s:\n%(message)s\n",
                 "datefmt": "%Y-%m-%d %H:%M:%S UTC",
             }
         },
