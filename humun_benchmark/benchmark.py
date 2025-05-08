@@ -29,6 +29,7 @@ def benchmark(
     batch_size: int = 10,
     train_ratio: int = 3,
     forecast_steps: int = 12,
+    cutoff_year: int = 2022,
     cuda: Optional[Union[int, str]] = "accelerate",
 ) -> None:
     """
@@ -60,6 +61,7 @@ def benchmark(
         "batch_size": batch_size,
         "train_ratio": train_ratio,
         "forecast_steps": forecast_steps,
+        "cutoff_year": cutoff_year,
         "cuda": cuda,
     }
     params_str = "\n".join(f"\t{k}: {v}" for k, v in params.items())
@@ -72,6 +74,7 @@ def benchmark(
         n_datasets=n_datasets,
         forecast_steps=forecast_steps,
         train_ratio=train_ratio,
+        cutoff_year=cutoff_year
     )
 
     # generate forecasts for each model
@@ -127,7 +130,6 @@ def benchmark(
 
 if __name__ == "__main__":
     models = [
-        "Qwen/Qwen2.5-1.5B-Instruct",
         "Qwen/Qwen2.5-3B-Instruct",
         "Qwen/Qwen2.5-7B-Instruct",
         "meta-llama/Llama-3.2-1B-Instruct",
@@ -141,6 +143,7 @@ if __name__ == "__main__":
         series_ids=MD_VINTAGE_IDS_MONTHLY,
         n_datasets=20,
         batch_size=10,
-        train_ratio=3,
-        forecast_steps=12,
+        train_ratio=7,
+        forecast_steps=6,
+        cutoff_year=2022,
     )
