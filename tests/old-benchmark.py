@@ -1,20 +1,21 @@
+import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import List, Union, Optional
-import json
-import pandas as pd
+from typing import List, Optional, Union
 
+import dotenv
+import pandas as pd
 import torch
 
-from humun_benchmark.config import MD_VINTAGE_IDS_MONTHLY, NUMERICAL, setup_logging
+from humun_benchmark.config import MD_VINTAGE_IDS_MONTHLY, NUMERICAL, setup_queue_logging
 from humun_benchmark.data import load_from_parquet
 from humun_benchmark.models import HuggingFace
 from humun_benchmark.prompts import InstructPrompt
 
-import dotenv
-
 dotenv.load_dotenv()
+
 
 # timestamp for output files
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -24,13 +25,12 @@ def benchmark(
     models: list[str] = ["llama-3.1-8b-instruct"],
     output_path: str = os.getenv("RESULTS_STORE"),
     datasets_path: str = os.getenv("DATASETS_PATH"),
-    series_ids: List[str] = MD_VINTAGE_IDS_MONTHLY,
-    n_datasets: int = 5,
+    series_ids=List[str],
+    n_datasets: int = None,
     batch_size: int = 10,
     train_ratio: int = 3,
     forecast_steps: int = 12,
-    cuda: Optional[Union[int, str]] = "accelerate",
-    context: bool = False,
+    cuda: Optional[Union[str, int]] = None,
 ) -> None:
     """
     Run benchmarks on time series data, selecting data either by filters or series IDs.
@@ -44,13 +44,11 @@ def benchmark(
         batch_size: Number of runs per inference
         train_ratio: Multiplier for training period
         forecast_steps: Number of forecast steps
-        cuda: Either an int (for a specific GPU), "accelerate" (to run in accelerate mode), or None.
-        context: Supply title and notes per dataset (if available) as context.
     """
 
     # write logs to output path
-    setup_logging(os.path.join(output_path, f"{timestamp}.log"))
-    log = logging.getLogger(__name__)
+    setup_queue_logging(os.path.join(output_path, f"{timestamp}.log"))
+    log = logging.getLogger("humun_benchmark.benchmark")
 
     # Log the selection method being used
     params = {
@@ -62,8 +60,6 @@ def benchmark(
         "batch_size": batch_size,
         "train_ratio": train_ratio,
         "forecast_steps": forecast_steps,
-        "cuda": cuda,
-        "context": context,
     }
     params_str = "\n".join(f"\t{k}: {v}" for k, v in params.items())
     log.info(f"Benchmark Parameters: {{\n{params_str}\n}}")
@@ -77,9 +73,45 @@ def benchmark(
         train_ratio=train_ratio,
     )
 
-    # generate forecasts for each model
-    for model in models:
-        log.info(f"Loading model: {model}")
+    # generate forecasts for each model on one GPU
+    if cuda != "parallel":
+        for model in models:
+            _run_model_inference(
+                fred_data=fred_data,
+                model=model,
+                output_path=output_path,
+                batch_size=batch_size,
+                cuda=cuda,
+            )
+
+    # parallelise
+    else:
+        available_gpus = torch.cuda.device_count()
+        log.info(f"Found {available_gpus} CUDA devices")
+
+        # use ThreadPoolExecutor to run each model on a different GPU
+        with ThreadPoolExecutor(max_workers=min(len(models), available_gpus)) as executor:
+            futures = []
+            for i, model in enumerate(models):
+                # distribute models across available GPUs
+                cuda_device = i % available_gpus
+                futures.append(
+                    executor.submit(
+                        _run_model_inference, fred_data, model, output_path, batch_size, cuda_device
+                    )
+                )
+
+            # wait for all tasks to complete
+            for future in as_completed(futures):
+                future.result()
+
+    log.info("Benchmark completed.")
+
+
+def _run_model_inference(fred_data: dict, model: str, output_path: str, batch_size: int, cuda: int):
+    log = logging.getLogger("humun_benchmark.benchmark")
+    try:
+        log.info(f"Running inference for {model}...")
 
         # create model instance and log config
         llm = HuggingFace(model, cuda=cuda)
@@ -91,14 +123,7 @@ def benchmark(
         for series_id, data in fred_data.items():
             model_result["dataset_info"][series_id] = data["dataset_info"]
 
-            prompt_context = data["dataset_info"] if context else None
-
-            prompt = InstructPrompt(
-                task=NUMERICAL,
-                history=data["history"],
-                forecast=data["forecast"],
-                context=prompt_context,
-            )
+            prompt = InstructPrompt(task=NUMERICAL, history=data["history"], forecast=data["forecast"])
 
             log.info(
                 f"Model: {model}\n"
@@ -132,7 +157,8 @@ def benchmark(
         output_df.to_parquet(output_file, index=False)
         log.info(f"Model output written to {output_file}")
 
-    log.info("Benchmark completed.")
+    except Exception as e:
+        log.exception(f"Failed to run inference for {model}: {e}")
 
 
 if __name__ == "__main__":
@@ -140,8 +166,8 @@ if __name__ == "__main__":
         "Qwen/Qwen2.5-1.5B-Instruct",
         "Qwen/Qwen2.5-3B-Instruct",
         "Qwen/Qwen2.5-7B-Instruct",
-        "meta-llama/Llama-3.2-1B-Instruct",
-        "meta-llama/Llama-3.2-3B-Instruct",
+        # "meta-llama/Llama-3.2-1B-Instruct",
+        # "meta-llama/Llama-3.2-3B-Instruct",
         "meta-llama/Llama-3.1-8B-Instruct",
         "Ministral-8B-Instruct-2410",
     ]
@@ -153,6 +179,5 @@ if __name__ == "__main__":
         batch_size=10,
         train_ratio=3,
         forecast_steps=12,
-        context=True,
-        cuda=0,
+        cuda="parallel",
     )

@@ -17,6 +17,7 @@ Instruct prompt method inspired by CiK forecasting [ [paper](https://arxiv.org/a
 * Use hugging-face chat template: as a lot of models using the transformers package are trained using the hugging face chat-template, it may be more advantageous to adopt this approach. Test to see if there are substantial changes in performance when inferencing. 
 * refactor metrics to analyse benchmark results in new format. 
 * configure logs for Multi-threading / accelerate (queue-based config)
+* change benchmark results to an object for better visibility / navigation than a standard dict.
 
 ## Installation
 > [!Note]

@@ -22,7 +22,6 @@ from transformers import (
     LlamaForCausalLM,
     pipeline,
 )
-from accelerate import Accelerator
 
 from humun_benchmark.data.formatting import parse_forecast_output
 from humun_benchmark.models import Model, ModelLoadError
@@ -93,28 +92,81 @@ class HuggingFace(Model):
     """
 
     def __init__(self, label: str, cuda: Optional[Union[int, str]] = None):
-        # cuda: int -> specific GPU; "accelerate" -> use Accelerator; None -> default auto device map.
-        if isinstance(cuda, int):
-            self.device_map = {"": f"cuda:{self.cuda}"}
-        else:
-            self.device_map = "auto"
-        self.accelerator = Accelerator() if cuda == "accelerate" else None
+        """Initializes model, tokenizer, and pipeline based on cuda config."""
+        super().__init__(label)  # Sets self.label
 
-        super().__init__(label)
-        self._load_model()
+        self.accelerator = None
+        device_map_config = "auto"  # Default device map
+
+        if isinstance(cuda, int):
+            # Specific GPU integer ID provided
+            device_map_config = {"": f"cuda:{cuda}"}
+        elif cuda == "accelerate":
+            # Attempt to use Accelerator; device_map handled by it (usually None/auto)
+            device_map_config = None  # Let Accelerator manage device placement
+            try:
+                from accelerate import Accelerator
+
+                self.accelerator = Accelerator()
+                log.info("HuggingFace Accelerator initialized.")  # Keep minimal info log
+            except ImportError:
+                log.warning(
+                    "'accelerate' requested but library not installed. Falling back to 'auto' device map."
+                )
+                device_map_config = "auto"  # Fallback if library is missing
+            except Exception as e:
+                log.warning(f"Failed to initialize Accelerator: {e}. Falling back to 'auto' device map.")
+                device_map_config = "auto"  # Fallback if init fails
+
+        # else: device_map_config remains "auto" for None or other strings
+
+        self.device_map_setting = device_map_config  # Store the final calculated setting
+
+        # Load the model and create the pipeline
+        try:
+            self._load_model()
+        except Exception as e:
+            # Re-raise errors during loading with more context
+            raise ModelLoadError(f"Failed to load model '{label}' with config cuda='{cuda}': {e}") from e
 
     def _load_model(self):
-        self.model, self.tokenizer = get_model_and_tokenizer(self.label, self.device_map)
+        """Loads the model/tokenizer and prepares the inference pipeline."""
+        # Determine device map for loading (needs dict or "auto")
+        # If accelerator is active but failed, device_map_setting might be 'auto' from fallback.
+        # If accelerator is active and succeeded, device_map_setting is None.
+        # Model loading itself often defaults to 'auto' or requires a specific map.
+        model_load_device_map = (
+            self.device_map_setting if self.device_map_setting is not None else "auto"
+        )
+        log.debug(f"Loading model/tokenizer with device_map='{model_load_device_map}'")
+        self.model, self.tokenizer = get_model_and_tokenizer(self.label, model_load_device_map)
+
+        pipeline_kwargs = {
+            "task": "text-generation",
+            "model": self.model,
+            "tokenizer": self.tokenizer,
+        }
 
         if self.accelerator:
+            # If accelerator is active, prepare the model and don't pass device_map to pipeline
+            log.debug("Preparing model with Accelerator.")
             self.model = self.accelerator.prepare(self.model)
+        else:
+            # If no accelerator, pass the determined device_map_setting (dict or "auto")
+            # Avoid passing device_map=None unless pipeline explicitly handles it
+            if self.device_map_setting is not None:
+                pipeline_kwargs["device_map"] = self.device_map_setting
+            else:
+                # If accelerator is None AND device_map_setting ended up None (shouldn't happen with fallback), default to auto
+                pipeline_kwargs["device_map"] = "auto"
+            log.debug(f"Using device_map='{pipeline_kwargs.get('device_map')}' for standard pipeline.")
 
-        self.pipeline = pipeline(
-            task="text-generation",
-            model=self.model,
-            tokenizer=self.tokenizer,
-            device_map=self.device_map,
-        )
+        # Create the pipeline
+        self.pipeline = pipeline(**pipeline_kwargs)
+        try:  # Optional: Log device info
+            log.info(f"Pipeline created on device: {self.pipeline.device}")
+        except Exception:
+            log.info("Pipeline created.")  # Fallback message
 
     @torch.inference_mode()
     def inference(
