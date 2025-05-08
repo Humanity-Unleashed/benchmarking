@@ -1,6 +1,6 @@
 <div align="center">
 
-A tool to evaluate LLMs with time-series forecasting and policy NLP tasks.  
+A tool to evaluate LLMs with time-series forecasting and policy NLP tasks, alongside other forecasting models.  
 
 **Humun Org**
 
@@ -13,11 +13,11 @@ Instruct prompt method inspired by CiK forecasting [ [paper](https://arxiv.org/a
 
 ## TODOs
 
-* Parallelise model looping: Accelerate can be implemented to speed up inference/training, however we are still running through the models and datasets sequentially. Multi-threading the distribution of models to different GPUs could help speed things up, while still running the datasets in a sequential manner (for each model on it's own GPU- sequentially run through the datasets). Due to each timeseries having different timestamps, they each need their own pipeline due to a different prefix function.
+* update readme...
+* add flags/args for running benchmark.py
+* update read_metrics to use folder instead of old date_prefixed parquets. 
+
 * Use hugging-face chat template: as a lot of models using the transformers package are trained using the hugging face chat-template, it may be more advantageous to adopt this approach. Test to see if there are substantial changes in performance when inferencing. 
-* refactor metrics to analyse benchmark results in new format. 
-* configure logs for Multi-threading / accelerate (queue-based config)
-* change benchmark results to an object for better visibility / navigation than a standard dict.
 
 ## Installation
 > [!Note]
@@ -30,7 +30,7 @@ make install
 ## Data
 The dataset being used is economic timeseries data scraped from FRED by the Data Collection team. This data has been mounted to the server currently at -
 
-* `/workspaces/datasets/fred/split.parquet`
+* `/workspaces/datasets/fred/fred.parquet`
 
 when read via `data.load_from_parquet()`, it assumes the format;   
 

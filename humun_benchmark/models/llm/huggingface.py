@@ -24,7 +24,6 @@ from transformers import (
     pipeline as hf_pipeline,
 )
 
-
 from humun_benchmark.config.common import NUMERICAL
 
 from ..base import InferenceError, Model, ModelLoadError
