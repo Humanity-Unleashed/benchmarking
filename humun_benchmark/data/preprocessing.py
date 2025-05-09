@@ -95,16 +95,18 @@ def load_from_parquet(
 
             timeseries_df["date"] = pd.to_datetime(timeseries_df["date"])
             timeseries_df["value"] = timeseries_df["value"].astype(float)
-            
+
             # Apply year cutoff filter if specified
             if cutoff_year is not None:
                 timeseries_df = timeseries_df[timeseries_df["date"].dt.year >= cutoff_year]
-                
+
                 # Check if we still have data after filtering
                 if len(timeseries_df) == 0:
-                    log.warning(f"Series {sid} has no data after applying year cutoff of {cutoff_year}. Skipping.")
+                    log.warning(
+                        f"Series {sid} has no data after applying year cutoff of {cutoff_year}. Skipping."
+                    )
                     continue
-                    
+
                 # Check if we have enough data for truncation after filtering
                 total_required = (train_ratio + 1) * forecast_steps
                 if len(timeseries_df) < total_required:
@@ -135,9 +137,11 @@ def dataset_info(series_id, title, original, history, forecast) -> str:
     o_len = len(original["value"])
     n_len = len(history["value"]) + len(forecast["value"])
     freq = pd.infer_freq(original["date"].sort_values()) or "Unknown"
-    
+
     # Add date range info to make year filtering more transparent
-    date_range = f"{original['date'].min().strftime('%Y-%m-%d')} to {original['date'].max().strftime('%Y-%m-%d')}"
+    date_range = (
+        f"{original['date'].min().strftime('%Y-%m-%d')} to {original['date'].max().strftime('%Y-%m-%d')}"
+    )
 
     return (
         f"ID: {series_id}\n"

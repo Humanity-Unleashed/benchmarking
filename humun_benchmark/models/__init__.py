@@ -1,2 +1,2 @@
-from .base import Model, ModelLoadError
-from .huggingface import HuggingFace
+from .llm import HuggingFace  # noqa: F401
+

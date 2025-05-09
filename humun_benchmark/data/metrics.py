@@ -13,20 +13,29 @@ def read_results(paths: Union[str, List[str]]) -> Dict[str, Dict]:
 
     # strip '_<datetime>.parquet' from path
     benchmarks = {
-        os.path.splitext(file)[0][:-16].split("/")[-1]: pd.read_parquet(file).iloc[0] for file in paths
+        os.path.splitext(file)[0].split("/")[-1]: pd.read_parquet(file).iloc[0] for file in paths
     }
 
-    for model in benchmarks.keys():
-        benchmarks[model] = benchmarks[model].to_dict()
+    for model, row in benchmarks.items():
+        data = row.to_dict()
+        # only literal_eval the cells that are strings
+        for key, val in data.items():
+            if isinstance(val, str):
+                try:
+                    data[key] = ast.literal_eval(val)
+                except (ValueError, SyntaxError):
+                    # if it wasn't a literal Python value, leave as-is
+                    pass
 
-        for key in benchmarks[model].keys():
-            benchmarks[model][key] = ast.literal_eval(benchmarks[model][key])
+        # now parse the nested JSON in the "results" sub‐dict
+        # (we expect data["results"] to be a dict of series_id → JSON strings)
+        parsed = {}
+        for series_id, json_str in data.get("results", {}).items():
+            df = pd.read_json(StringIO(json_str), convert_dates=["date"])
+            parsed[series_id] = df
+        data["results"] = parsed
 
-        for series_id, json_str in benchmarks[model]["results"].items():
-            df = pd.read_json(StringIO(json_str))
-            if "date" in df.columns:
-                df["date"] = pd.to_datetime(df["date"])
-            benchmarks[model]["results"][series_id] = df
+        benchmarks[model] = data
 
     return benchmarks
 
@@ -46,7 +55,7 @@ def crps_closed_form(actual, forecasts):
 
 def normalized_crps(actual, forecasts, overall_range):
     """
-    Computes a normalized CRPS by scaling the raw CRPS using a task-dependent factor α,
+    Computes a normalized CRPS by scaling the raw CRPS using a factor α,
     where α is 1 divided by the overall range of the actual values.
     This normalization makes the CRPS scale-independent.
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-A tool to evaluate LLMs with time-series forecasting and policy NLP tasks.  
+A tool to evaluate LLMs with time-series forecasting and policy NLP tasks, alongside other forecasting models.  
 
 **Humun Org**
 
@@ -11,12 +11,6 @@ A tool to evaluate LLMs with time-series forecasting and policy NLP tasks.
 
 Instruct prompt method inspired by CiK forecasting [ [paper](https://arxiv.org/abs/2410.18959) | [github](https://github.com/ServiceNow/context-is-key-forecasting/blob/main/cik_benchmark/baselines/direct_prompt.py) ].
 
-## TODOs
-
-* Parallelise model looping: Accelerate can be implemented to speed up inference/training, however we are still running through the models and datasets sequentially. Multi-threading the distribution of models to different GPUs could help speed things up, while still running the datasets in a sequential manner (for each model on it's own GPU- sequentially run through the datasets). Due to each timeseries having different timestamps, they each need their own pipeline due to a different prefix function.
-* Use hugging-face chat template: as a lot of models using the transformers package are trained using the hugging face chat-template, it may be more advantageous to adopt this approach. Test to see if there are substantial changes in performance when inferencing. 
-* refactor metrics to analyse benchmark results in new format. 
-* configure logs for Multi-threading / accelerate (queue-based config)
 
 ## Installation
 > [!Note]
@@ -29,16 +23,16 @@ make install
 ## Data
 The dataset being used is economic timeseries data scraped from FRED by the Data Collection team. This data has been mounted to the server currently at -
 
-* `/workspaces/datasets/fred/split.parquet`
+* `/workspaces/datasets/fred/fred.parquet`
 
-when read via `data.load_from_parquet()`, it assumes the format;   
+when read via `humun_benchmark.data.load_from_parquet()`, it assumes the format;   
 
 ```python 
-# Dictionary of format:
     { "id1": { "history": pd.DataFrame, "forecast": pd.DataFrame, "title": str, "notes" : str },
       "id2": ... }
 ```
->![!Note] This data is truncated and split in the function - see function definition for details.  
+> [!Note]
+> This data is truncated and split in the function - see function definition for details.  
 
 ## Environment Variables 
 > [!Note]
@@ -48,8 +42,7 @@ Contained in `.env` and loaded by `pydotenv`.
 
 | Variable Name | Description | Default Value |
 |--------------|-------------|----------------|
-| DATASETS_PATH | Path to FRED time series data parquet file | `/workspace/datasets/fred/split.parquet` |
-| METADATA_PATH | Path to FRED series metadata CSV | `/workspace/datasets/fred/all_fred_metadata.csv` |
+| DATASETS_PATH | Path to FRED time series data parquet file | `/workspace/datasets/fred/fred.parquet` |
 | RESULTS_STORE | Directory for storing benchmark results | `/workspace/pretraining/benchmarks` |
 | HF_HOME | Directory for shared HuggingFace model cache | `/workspace/huggingface_cache` |
 | HF_TOKEN_PATH | Path for HuggingFace authentication token | `~/.cache/huggingface/token` |
@@ -60,6 +53,18 @@ Contained in `.env` and loaded by `pydotenv`.
 
 To run a benchmark, you can simply run the `benchmark.py` file, where a call is made to the function contained in the same file, using a set of config parameters which you can edit (arg parse will be re-added soon for easier config); 
 
+    Required:
+    * models: A dictionary containing models to benchmark.
+        e.g. models = {
+            "llm": [
+                "Qwen/Qwen2.5-7B-Instruct",
+                "meta-llama/Llama-3.1-8B-Instruct",
+                "Ministral-8B-Instruct-2410",
+            ],
+            "statistical": ['arima'],
+        }
+
+    Optional:
     * output_path: Where to store results
     * datasets_path: Path to time series data
     * series_ids: List of series IDs from FRED data
@@ -67,24 +72,38 @@ To run a benchmark, you can simply run the `benchmark.py` file, where a call is 
     * batch_size: Number of runs per inference
     * train_ratio: Multiplier for training period  
     * forecast_steps: Number of forecast steps
-    * cuda: Either an int (for a specific GPU), "accelerate" (to run in accelerate mode), or None.
+    * context: Bool for whether to include context or not for LLMs
+    * available_gpu_ids: List of available GPU IDs to use. Tries to use all when not provided.
+    * level: logging level (default is logging.INFO)
 
-Generating inference - 
+
+Generating forecasts - 
 ```bash
 > make install
 > source .venv/bin/activate
 > python humun_benchmark/benchmark.py 
 ```
 
+Results store. Uses .env + datetime string by default.
+```bash
+/workspace/pretraining/benchmarks/YYYYMMDD_HHMMSS/
+  ├ benchmark.log
+  ├ Qwen…parquet
+  ├ meta-llama…parquet
+  └ …
+```
+
 Calculating metrics - 
 ```python
 from humun_benchmark.data.metrics import read_results, compute_all_metrics
 
-paths = glob.glob(f"/workspace/pretraining/benchmarks/*<some_datestamp>.parquet")
+paths = glob.glob(f"/workspace/pretraining/benchmarks/<folder_name>/*.parquet")
 results = read_results(paths)
 metrics = compute_all_metrics(results)
-metrics['benchmark'] # pd.DataFrame of cross-dataset results for all models selected
+metrics['overall_metrics'] # pd.DataFrame of cross-dataset results for all models selected
 ```
+
+
 
 
 

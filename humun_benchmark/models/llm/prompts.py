@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 from pydantic import BaseModel
 
-from humun_benchmark.data.formatting import format_timeseries_input
+from .formatting import format_timeseries_input
 
 
 # Parent class for all prompt methods
@@ -87,7 +87,7 @@ class InstructPrompt(Prompt):
         self.forecast["date"] = pd.to_datetime(self.forecast["date"])
 
         # Merge with original forecast values to obtain actual value column for metrics
-        self.results = pd.merge(
+        return pd.merge(
             merged_df,
             self.forecast[["date", "value"]],
             on="date",
