@@ -28,11 +28,11 @@ The dataset being used is economic timeseries data scraped from FRED by the Data
 when read via `humun_benchmark.data.load_from_parquet()`, it assumes the format;   
 
 ```python 
-# Dictionary of format:
     { "id1": { "history": pd.DataFrame, "forecast": pd.DataFrame, "title": str, "notes" : str },
       "id2": ... }
 ```
->![!Note] This data is truncated and split in the function - see function definition for details.  
+> [!Note]
+> This data is truncated and split in the function - see function definition for details.  
 
 ## Environment Variables 
 > [!Note]
